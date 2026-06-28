@@ -19,12 +19,14 @@ This isn't a clean architecture that merely inverts the *direction of dependenci
 
 The central `Kernel` does only two things: **send messages** and **manage shared memory**.
 
-> **And this is not just a claim — the compiler guarantees it.** Dependency and execution point the same way, and both are checked at build time:
+> **What is actually guaranteed — stated plainly.** Two different things are enforced at two different times, and it helps not to conflate them:
 >
-> - **Dependency** — the [`Package.swift`](Package.swift) target graph *is* the enforcement. A target can only `import` the modules listed in its `dependencies`, so a back-edge (Kernel reaching for Presentation, Compute for Infrastructure, …) simply won't compile. Inner targets stay leaves; `concentric-arch` (App) is the only root.
-> - **Execution** — messages flow forward through the phantom-typed `Symbol<Payload, Output>` and the `Pipe` builder, whose chain constraint ("previous `Return` == next `Payload`") is checked at compile time. There is no return path.
+> - **Module dependencies are static.** The compiler enforces the inward direction: a target can only `import` what is listed in its `dependencies` ([`Package.swift`](Package.swift)), so no device can reach another and nothing reaches outward. `Kernel` is a leaf; `concentric-arch` (App) is the only root.
+> - **Execution is mediated, and only its *types* are static.** Every cross-device call is erased into a `Symbol<Payload, Output>` dispatched through the injected `Kernel` bus. The phantom types — plus the `Pipe` constraint "previous `Return` == next `Payload`" — pin the payload and result at compile time, but *which* handler answers a symbol is resolved at runtime. An unwired symbol is a `KernelError.unbound` thrown at the call, not a compile error.
 >
-> Dependency injection is used at the seams — Drivers bind handlers into the `KernelBuilder`, and the kernel is handed to composing handlers at call time — but it opens no hole in either axis: the same `Symbol` pins both ends, so the dynamic wiring still resolves to the one compiler-checked direction.
+> So this is **not dependency inversion** in the classic sense — no high→low arrow is flipped through an interface, because there is no such arrow to begin with. The dependency is dissolved into a `Symbol` and mediated by a centrally injected bus; the concrete bindings are wired at the composition root (`App` / `Driver`). The injected kernel is the whole trick.
+>
+> And that is exactly why it reads as a **type-bound `goto`**: a call jumps to a symbol the way `goto` jumps to a label — resolved late, possibly `unbound` — yet the `Symbol`'s phantom types keep the payload and result type-checked across the jump.
 
 ## 2. What it gives you
 
