@@ -38,9 +38,18 @@ private func rootTag(_ id: UUID) -> String { String(id.uuidString.prefix(6)) }
 
 struct KernelMonitorView: View {
     @State private var viewModel: KernelMonitorViewModel
+    /// Row selected in the trace table; its full payload shows in the lower pane.
+    @State private var selection: TraceTree.ID?
 
     init(viewModel: KernelMonitorViewModel) {
         _viewModel = State(initialValue: viewModel)
+    }
+
+    /// The entry behind the selected row (looked up flat by id — the table id is
+    /// `entry.id`), or `nil` when nothing is selected.
+    private var selectedEntry: TraceEntry? {
+        guard let selection else { return nil }
+        return viewModel.entries.first { $0.id == selection }
     }
 
     var body: some View {
@@ -62,32 +71,71 @@ struct KernelMonitorView: View {
             }
             .padding(8)
             Divider()
-            // Hierarchical Table: `children` drives the disclosure outline, so the
-            // call tree indents in the leading (symbol) column and each flow folds
-            // independently. Expansion is keyed by the stable `entry.id`.
-            Table(viewModel.forest, children: \.children) {
-                TableColumn("symbol") { (node: TraceTree) in
-                    Text(node.entry.symbol).font(.system(.body, design: .monospaced))
-                }
-                TableColumn("#") { (node: TraceTree) in Text("\(node.entry.id)").monospacedDigit() }
-                    .width(48)
-                TableColumn("time") { (node: TraceTree) in Text(traceTimeFormatter.string(from: node.entry.timestamp)).monospacedDigit() }
-                    .width(96)
-                TableColumn("flow") { (node: TraceTree) in Text(rootTag(node.root)).font(.system(.body, design: .monospaced)).foregroundStyle(.secondary) }
-                    .width(64)
-                TableColumn("verb") { (node: TraceTree) in Text(node.entry.verb.rawValue).foregroundStyle(color(for: node.entry.verb)) }
-                    .width(64)
-                TableColumn("payload") { (node: TraceTree) in
-                    Text(node.entry.payload ?? "—")
-                        .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(node.entry.payload == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                        .help(node.entry.payload ?? "")
-                }
+            // Split the window ~8:2 (draggable): the call-tree table on top, the
+            // selected row's full payload on the bottom — the table's payload
+            // column truncates to one line, so the lower pane is where you read it.
+            VSplitView {
+                traceTable
+                    .frame(minHeight: 160)
+                payloadDetail
+                    .frame(minHeight: 56, idealHeight: 120)
             }
         }
         .frame(minWidth: 480, minHeight: 320)
+    }
+
+    // Hierarchical Table: `children` drives the disclosure outline, so the call
+    // tree indents in the leading (symbol) column and each flow folds
+    // independently. Expansion and selection are keyed by the stable `entry.id`.
+    private var traceTable: some View {
+        Table(viewModel.forest, children: \.children, selection: $selection) {
+            TableColumn("symbol") { (node: TraceTree) in
+                Text(node.entry.symbol).font(.system(.body, design: .monospaced))
+            }
+            TableColumn("#") { (node: TraceTree) in Text("\(node.entry.id)").monospacedDigit() }
+                .width(48)
+            TableColumn("time") { (node: TraceTree) in Text(traceTimeFormatter.string(from: node.entry.timestamp)).monospacedDigit() }
+                .width(96)
+            TableColumn("flow") { (node: TraceTree) in Text(rootTag(node.root)).font(.system(.body, design: .monospaced)).foregroundStyle(.secondary) }
+                .width(64)
+            TableColumn("verb") { (node: TraceTree) in Text(node.entry.verb.rawValue).foregroundStyle(color(for: node.entry.verb)) }
+                .width(64)
+            TableColumn("payload") { (node: TraceTree) in
+                Text(node.entry.payload ?? "—")
+                    .font(.system(.body, design: .monospaced))
+                    .foregroundStyle(node.entry.payload == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+        }
+    }
+
+    // Lower pane: the selected entry's full payload, wrapped and selectable
+    // (the table column shows only a one-line preview).
+    private var payloadDetail: some View {
+        ScrollView {
+            if let entry = selectedEntry {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 8) {
+                        Text(entry.symbol).font(.system(.callout, design: .monospaced)).bold()
+                        Text(entry.verb.rawValue).foregroundStyle(color(for: entry.verb))
+                        Text("#\(entry.id)").foregroundStyle(.secondary).monospacedDigit()
+                    }
+                    Text(entry.payload ?? "Payload capture is off — switch the “payload” toggle on, then re-run, to show it here.")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(entry.payload == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                Text("Select a row to inspect its payload")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            }
+        }
     }
 
     private func color(for verb: TraceVerb) -> Color {
