@@ -1,0 +1,121 @@
+included:
+  - Sources
+
+excluded:
+  - Sources/DI  # DI containers enumerate registrations — complexity rules not applicable here
+
+# ── Opt-in rules ──────────────────────────────────────────────────────────────
+opt_in_rules:
+  - empty_count           # prefer .isEmpty over == 0
+  - first_where           # prefer .first(where:) over .filter{}.first
+  - force_unwrapping      # ban !-unwrapping; use guard/if let
+  - explicit_init         # ban redundant .init()
+  - closure_end_indentation
+
+# ── File length (perclst: max-lines 300) ──────────────────────────────────────
+file_length:
+  warning: 300
+  error: 300
+  ignore_comment_only_lines: true
+
+# ── Type body length ──────────────────────────────────────────────────────────
+type_body_length:
+  warning: 200
+  error: 200
+
+# ── Function body length (perclst: max-lines-per-function 50) ─────────────────
+function_body_length:
+  warning: 50
+  error: 50
+
+# ── Parameter count (perclst: max-params 4) ───────────────────────────────────
+function_parameter_count:
+  warning: 4
+  error: 4
+  ignores_default_parameters: true
+
+# ── Cyclomatic complexity (perclst: complexity 10) ────────────────────────────
+cyclomatic_complexity:
+  warning: 10
+  error: 10
+  ignores_case_statements: true
+
+# ── Nesting (perclst: max-depth 3) ────────────────────────────────────────────
+nesting:
+  type_level:
+    warning: 2
+    error: 2
+  function_level:
+    warning: 3
+    error: 3
+
+# ── Line length ───────────────────────────────────────────────────────────────
+line_length:
+  warning: 120
+  error: 120
+  ignores_comments: true
+  ignores_urls: true
+
+# ── Disabled ──────────────────────────────────────────────────────────────────
+disabled_rules:
+  - trailing_whitespace
+
+# ── Layer dependency enforcement ──────────────────────────────────────────────
+# Architecture: Presentation → UseCases → Domain → Repositories → Infrastructure
+# Mirrors perclst's no-restricted-imports rules per layer.
+custom_rules:
+  domain_no_infrastructure_imports:
+    included: "Sources/Circuit/.*\\.swift"
+    name: "Domain No Infrastructure Imports"
+    regex: "^import (SwiftData|Photos)"
+    message: "Domain layer must not import infrastructure frameworks. Use Repository protocols instead."
+    severity: error
+
+  domain_no_ui_imports:
+    included: "Sources/Circuit/.*\\.swift"
+    name: "Domain No UI Imports"
+    regex: "^import (SwiftUI|UIKit)"
+    message: "Domain layer must not import UI frameworks."
+    severity: error
+
+  usecase_no_ui_imports:
+    included: "Sources/UseCases/.*\\.swift"
+    name: "UseCase No UI Imports"
+    regex: "^import (SwiftUI|UIKit)"
+    message: "UseCase layer must not import UI frameworks."
+    severity: error
+
+  usecase_no_infrastructure_imports:
+    included: "Sources/UseCases/.*\\.swift"
+    name: "UseCase No Infrastructure Imports"
+    regex: "^import (SwiftData|Photos)"
+    message: "UseCase layer must not import infrastructure frameworks. Use Repository protocols instead."
+    severity: error
+
+  repositories_no_ui_imports:
+    included: "Sources/Repositories/.*\\.swift"
+    name: "Repository No UI Imports"
+    regex: "^import (SwiftUI|UIKit)"
+    message: "Repository layer must not import UI frameworks."
+    severity: error
+
+  domain_services_no_infrastructure_imports:
+    included: "Sources/Circuit/Services/.*\\.swift"
+    name: "Domain Services No Infrastructure Imports"
+    regex: "^import (SwiftData|Photos)"
+    message: "Domain Services must not import infrastructure frameworks. Use Repository protocols."
+    severity: error
+
+  domain_services_no_ui_imports:
+    included: "Sources/Circuit/Services/.*\\.swift"
+    name: "Domain Services No UI Imports"
+    regex: "^import (SwiftUI|UIKit)"
+    message: "Domain Services must not import UI frameworks."
+    severity: error
+
+  errors_only_foundation:
+    included: "Sources/Errors/.*\\.swift"
+    name: "Errors layer imports only Foundation"
+    regex: "^import (?!Foundation([\\. ]|$)).*"
+    message: "Errors is a leaf-node layer; may import Foundation only."
+    severity: error

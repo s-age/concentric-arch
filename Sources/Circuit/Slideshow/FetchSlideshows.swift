@@ -1,0 +1,30 @@
+import Kernel
+import Contract
+
+/// Pipeline: `Infrastructure.Library.fetchAll ▶ project ▶ buffer.write(LibraryState)`
+///
+/// Besides returning the projection, this commits the list into `LibraryState`,
+/// flipping `isLoading` around the fetch so Presentation observes the loading and
+/// loaded states without ever writing the buffer itself.
+package func fetchSlideshows(_ kernel: Kernel, _ payload: FetchSlideshowsPayload) async throws {
+    await kernel.buffer.mutate(LibraryState.self) { $0.isLoading = true }
+
+    try await kernel.run(
+        pipeline(Infrastructure.Library.fetchAll)               // Void -> [Slideshow]
+            .map { $0.map(SlideshowReturn.init(from:)) }         // -> [SlideshowReturn]
+            .effect { kernel, returns in
+                // Authoritative full reload. This is the one writer NOT safe against
+                // a mutation that lands during `fetchAll` above (a create during cold
+                // load is lost; a delete during a warm reload is resurrected): the
+                // snapshot was taken before the I/O. We accept it — the DB stays
+                // correct and the buffer reconciles on the next reload — rather than
+                // serialize every writer. Closing it would require a lock or a
+                // version/CAS guard around this apply.
+                await kernel.buffer.mutate(LibraryState.self) {
+                    $0.slideshows = returns
+                    $0.isLoading = false
+                }
+            },
+        ()
+    )
+}

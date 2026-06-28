@@ -1,0 +1,29 @@
+# Xcode
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcodeproj/xcuserdata/
+*.xcworkspace/xcuserdata/
+DerivedData/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# SwiftPM
+.build/
+.swiftpm/
+
+# Build output
+build/
+*.app/
+
+# macOS
+.DS_Store
+
+# Node (used by meta-pipeline-creator validation scripts)
+node_modules/
+package-lock.json
+
+# Claude Code (local settings, temporary files, agent state)
+.claude/
+
+# Xcode project file contains developer-specific signing config (DEVELOPMENT_TEAM, BUNDLE_IDENTIFIER)
+10slide.xcodeproj/project.pbxproj
