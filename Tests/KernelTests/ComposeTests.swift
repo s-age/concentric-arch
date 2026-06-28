@@ -190,7 +190,7 @@ func invokeRecordsSymbolAndVerbIntoTheTrace() async throws {
         builder.register(guarded) { n -> Verb<Int> in n < 0 ? .fail(Boom()) : .next(n * 2) }
         return builder.build(
             buffer: BufferBuilder().build(),
-            onTrace: { symbol, verb, _ in await probe.hit("\(symbol):\(verb.rawValue)") }
+            onTrace: { symbol, verb, _, _, _ in await probe.hit("\(symbol):\(verb.rawValue)") }
         )
     }
 
@@ -204,11 +204,77 @@ func invokeRecordsSymbolAndVerbIntoTheTrace() async throws {
     ])
 }
 
+/// Collects the raw `(symbol, span, parent)` the trace sink emits, so a test can
+/// assert the call tree the kernel rebuilds as data.
+private actor TraceCollector {
+    struct Record { let symbol: String; let span: UUID; let parent: UUID? }
+    private(set) var records: [Record] = []
+    func add(_ symbol: String, _ span: UUID, _ parent: UUID?) {
+        records.append(Record(symbol: symbol, span: span, parent: parent))
+    }
+}
+
+@Test
+func invokeBuildsACallTreeFromSpanAndParent() async throws {
+    // A composing handler that calls a leaf twice. The two leaves must come out
+    // as children of the composing invoke (same parent = its span), and the
+    // composing invoke itself as a flow root (parent == nil). Recording is
+    // post-order, so children land before their parent.
+    let parent = Symbol<Int, Int>("test.parent")
+    let collector = TraceCollector()
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(increment) { $0 + 1 }
+        builder.register(parent) { (k: Kernel, n: Int) async throws -> Int in
+            let a = try await k.call(increment, n)
+            return try await k.call(increment, a)
+        }
+        return builder.build(
+            buffer: BufferBuilder().build(),
+            onTrace: { symbol, _, span, parent, _ in await collector.add(symbol, span, parent) }
+        )
+    }
+
+    _ = try await kernel.call(parent, 1)
+
+    let records = await collector.records
+    #expect(records.map(\.symbol) == ["test.increment", "test.increment", "test.parent"]) // post-order
+    let root = try #require(records.first { $0.symbol == "test.parent" })
+    #expect(root.parent == nil)                                  // flow root
+    let leaves = records.filter { $0.symbol == "test.increment" }
+    #expect(leaves.allSatisfy { $0.parent == root.span })        // both children of the root
+    #expect(Set(leaves.map(\.span)).count == 2)                  // distinct node identities
+}
+
+@Test
+func concurrentCallsSeparateIntoDistinctRoots() async throws {
+    // Two calls driven from independent child tasks interleave in the flat log
+    // but must land in two different trees — each its own root, no cross-linking.
+    let collector = TraceCollector()
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(increment) { $0 + 1 }
+        return builder.build(
+            buffer: BufferBuilder().build(),
+            onTrace: { symbol, _, span, parent, _ in await collector.add(symbol, span, parent) }
+        )
+    }
+
+    async let a = kernel.call(increment, 1)
+    async let b = kernel.call(increment, 2)
+    _ = try await (a, b)
+
+    let records = await collector.records
+    #expect(records.count == 2)
+    #expect(records.allSatisfy { $0.parent == nil })   // both are flow roots
+    #expect(Set(records.map(\.span)).count == 2)        // distinct, unlinked trees
+}
+
 @Test
 func traceStateRingTrimsToCapAndKeepsSequence() {
     var state = TraceState()
     let epoch = Date(timeIntervalSince1970: 0)
-    for n in 0..<10 { state.record(symbol: "s\(n)", verb: .next, at: epoch, cap: 3) }
+    for n in 0..<10 { state.record(symbol: "s\(n)", verb: .next, span: UUID(), parent: nil, at: epoch, cap: 3) }
     #expect(state.entries.map(\.symbol) == ["s7", "s8", "s9"]) // oldest dropped
     #expect(state.entries.map(\.id) == [7, 8, 9])              // monotonic seq survives trim
 }

@@ -67,7 +67,7 @@ package final class KernelBuilder {
     package func build(
         buffer: Buffer,
         onError: @escaping @Sendable (any Error) async -> Void = { _ in },
-        onTrace: @escaping @Sendable (String, TraceVerb, Date) async -> Void = { _, _, _ in }
+        onTrace: @escaping @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ at: Date) async -> Void = { _, _, _, _, _ in }
     ) -> Kernel {
         Kernel(handlers: handlers, buffer: buffer, errorSink: onError, traceSink: onTrace)
     }
@@ -94,14 +94,26 @@ package final class Kernel: Sendable {
     private let errorSink: @Sendable (any Error) async -> Void
     /// Where each symbol invocation is recorded (DEBUG only) — wired by App to
     /// the buffer's `TraceState`. No-op by default, so release and tests pay
-    /// nothing.
-    private let traceSink: @Sendable (_ symbol: String, _ verb: TraceVerb, _ at: Date) async -> Void
+    /// nothing. `span` is the node `invoke` opened; `parent` is the enclosing
+    /// invoke's span (`nil` at a flow root).
+    private let traceSink: @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ at: Date) async -> Void
+
+    #if DEBUG
+    /// Ambient span of the currently-executing `invoke`, propagated down the
+    /// call tree by `TaskLocal`. Each `invoke` reads it as its `parent`, opens a
+    /// fresh `span`, and binds that span while its handler runs — so any nested
+    /// invoke (including concurrent `async let`/TaskGroup fan-out, which inherits
+    /// task-locals at creation) sees this span as its parent. A `nil` ambient
+    /// means no enclosing invoke: the node is a flow root. This is how the kernel
+    /// rebuilds, as data, the call tree the stack would have given for free.
+    @TaskLocal static var span: UUID?
+    #endif
 
     fileprivate init(
         handlers: [String: @Sendable (Kernel, Any) async throws -> Verb<Any>],
         buffer: Buffer,
         errorSink: @escaping @Sendable (any Error) async -> Void,
-        traceSink: @escaping @Sendable (String, TraceVerb, Date) async -> Void
+        traceSink: @escaping @Sendable (String, TraceVerb, UUID, UUID?, Date) async -> Void
     ) {
         self.handlers = handlers
         self.buffer = buffer
@@ -115,14 +127,27 @@ package final class Kernel: Sendable {
     ///
     /// This is the single chokepoint every `call`/`dispatch`/pipe stage funnels
     /// through, so the DEBUG trace hook here sees the whole graph light up,
-    /// stage by stage — not just the outer boundaries.
+    /// stage by stage — not just the outer boundaries. Because every node is an
+    /// `invoke`, building the trace tree here (read the ambient span as parent,
+    /// open a child span, bind it while the handler runs) is all it takes:
+    /// `call`/`compose`/`run`/`dispatch` need no span logic of their own — they
+    /// just thread the ambient span through, which is the whole "control as data"
+    /// claim. The record happens after the handler returns (verb is the point of
+    /// the entry), so children are recorded before their parent (post-order); the
+    /// tree is rebuilt from `span`/`parent`, not from record order.
     func invoke(_ id: String, _ payload: Any) async throws -> Verb<Any> {
         guard let handler = handlers[id] else { throw KernelError.unbound(id) }
-        let verb = try await handler(self, payload)
         #if DEBUG
-        await traceSink(id, TraceVerb(verb), Date())
-        #endif
+        let parent = Kernel.span
+        let span = UUID()
+        let verb = try await Kernel.$span.withValue(span) {
+            try await handler(self, payload)
+        }
+        await traceSink(id, TraceVerb(verb), span, parent, Date())
         return verb
+        #else
+        return try await handler(self, payload)
+        #endif
     }
 
     /// Call one symbol and get its typed `Output`. A single call is just a
