@@ -14,9 +14,6 @@ package struct CircuitConfigDriver {
     package init() {}
 
     package func wire(into builder: KernelBuilder) {
-        builder.register(Contract.Circuit.Config.load) { kernel, payload in
-            try await loadConfig(kernel, payload)
-        }
         builder.register(Contract.Circuit.Config.save) { kernel, payload in
             try await saveConfig(kernel, payload)
         }

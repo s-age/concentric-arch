@@ -25,9 +25,6 @@ package struct SlideshowDriver {
         builder.register(Contract.Circuit.Slideshow.updateConfig) { kernel, payload in
             try await updateSlideshowConfig(kernel, payload)
         }
-        builder.register(Contract.Circuit.Slideshow.fetch) { kernel, payload in
-            try await fetchSlideshow(kernel, payload)
-        }
         builder.register(Contract.Circuit.Slideshow.fetchAll) { kernel, payload in
             try await fetchSlideshows(kernel, payload)
         }

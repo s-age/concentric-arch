@@ -51,7 +51,7 @@ There are four ways to send into the `Kernel`. Choose by **whether there is a re
 | API | Return path | Use | On failure |
 |---|---|---|---|
 | `kernel.call(symbol, payload) -> O` | yes | A one-off query that needs a value (i.e. a one-stage pipe). | `throws` |
-| `kernel.compose(pipe, payload) -> O` | yes | A value-returning pipeline. The `.abort` / `.divert` value becomes the result. | `throws` |
+| `kernel.compose(pipe, payload) -> O` | yes | A value-returning pipeline. The `.abort` / `.divert` value becomes the result. *Reserved: no production caller at present — kept for synchronous needs (e.g. MCP-style tools) and as the engine behind `.divert`.* | `throws` |
 | `kernel.dispatch(symbol, payload)` | **none** (fire-and-forget) | **Presentation's main entry point.** Enqueues on the serial bus and returns immediately — no `await`, no return value, no `throws`. | Routed to `buffer` (`AppErrorState`) via `errorSink` |
 | `kernel.run(pipe, payload)` | **none** (forward-only) | **Circuit's commands.** Discards the final value; results are published into `buffer` through `.tap` / `.effect`. | `throws` (caught by the caller — `dispatch`) |
 
