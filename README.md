@@ -51,6 +51,16 @@ The central `Kernel` does only two things: **send messages** and **manage shared
 
 > Not drawn in the diagram, but just outside the outermost ring lives `App` (`@main`) — the **source node** that wires every Driver into the Kernel. `App` and the external hardware (screen, disk) are universal to any architecture, so the diagram leaves them out.
 
+## Influences
+
+No invention is claimed. "Control as data" isn't a new wish — it's a lineage that has always treated **control as something you can see and wire**, and this design just follows it into a typed Swift app:
+
+- **Node-graph dataflow — Scratch, ComfyUI, redstone.** Here computation *is* the wiring. Scratch's "broadcast and receive" is exactly this `buffer`: a message sent with no return, picked up by whoever subscribes. ComfyUI is `pipeline(...).pipe(...).map(...)` drawn as nodes; a redstone circuit is forward-only signal through wired devices. These traditions are usually dynamic and untyped — the one move here is to keep that wiring sensibility but bind it with Swift's phantom types (hence the **type-bound `goto`**).
+- **UNIX pipelines.** Taken literally as the `Verb` / `Pipe` forward drive: a stage's `Return` is the next stage's `Payload`, streaming left to right.
+- **React / Redux** (five years of it). The `buffer` is the store, `dispatch` and subscription are the loop, the data flows one way.
+
+If there is a contribution, it's the synthesis: making these coherent under a single OS metaphor, with the dispatching kernel — not the domain — at the center.
+
 ---
 
 ## Message drive modes
