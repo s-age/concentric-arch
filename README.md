@@ -57,7 +57,7 @@ There are four ways to send into the `Kernel`. Choose by **whether there is a re
 
 Typical path: `Presentation.dispatch` → the Kernel `call`s through the serial bus → a Circuit handler streams forward with `kernel.run(pipe)` → an `effect` updates the `buffer` → Presentation re-renders from its subscription. The point is that **nothing is returned by value.**
 
-> **Forward-only ≠ no `await`.** "Forward-only" is about *control*: there is no return path (復路) — a stage's result flows on to the next stage or is published to the `buffer`, never bubbled back to the caller. The `await` inside a pipeline is about *time*: each data-dependent stage waits for the previous one to finish before stepping forward (the I/O is genuinely async). The direction stays forward; `await` just paces the stride. Even a `.fail` doesn't travel back up — it exits sideways into the `buffer` at the `dispatch` boundary.
+> **Forward-only ≠ no `await`.** "Forward-only" is about *control*: there is no return path — a stage's result flows on to the next stage or is published to the `buffer`, never bubbled back to the caller. The `await` inside a pipeline is about *time*: each data-dependent stage waits for the previous one to finish before stepping forward (the I/O is genuinely async). The direction stays forward; `await` just paces the stride. Even a `.fail` doesn't travel back up — it exits sideways into the `buffer` at the `dispatch` boundary.
 
 ## Pipe control words — Verb
 
