@@ -52,14 +52,6 @@ package struct UpdateSlideshowConfigPayload {
     }
 }
 
-package struct FetchSlideshowPayload {
-    package let id: UUID
-
-    package init(id: UUID) {
-        self.id = id
-    }
-}
-
 package struct FetchSlideshowsPayload {
     package init() {}
 }
@@ -73,10 +65,6 @@ package struct DeleteSlideshowPayload {
 }
 
 // MARK: Config
-
-package struct LoadConfigPayload {
-    package init() {}
-}
 
 package struct SaveConfigPayload {
     package let duration: SlideDurationReturn
