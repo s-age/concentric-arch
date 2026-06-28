@@ -1,27 +1,6 @@
 // swift-tools-version: 6.0
 import PackageDescription
 
-// ConcentricArch — a kernel-centric, forward-only concentric architecture.
-// Overview & diagram: https://github.com/s-age/concentric-arch#readme
-//
-// The single inward direction this project claims is not just prose — the
-// compiler enforces it on two axes that meet at one point:
-//
-//   • Dependency. The target graph below *is* the enforcement: a target can
-//     only `import` a module listed in its `dependencies`, so a back-edge
-//     (Kernel reaching for Presentation, Compute for Infrastructure, …) fails
-//     to compile. Inner targets stay leaves; `concentric-arch` (App) is the
-//     only root that sees everything.
-//
-//   • Execution. Messages flow forward through phantom-typed `Symbol<P, O>`
-//     and the `Pipe` builder, whose chain constraint ("previous Return == next
-//     Payload") is checked at compile time. There is no return path.
-//
-// Dependency injection is used at the seams — Drivers bind handlers into the
-// `KernelBuilder`, and the kernel is handed to composing handlers at call time
-// — but it opens no hole in either axis: the same `Symbol` pins both ends, so
-// the dynamic wiring still resolves to the one compiler-checked direction.
-
 let package = Package(
     name: "ConcentricArch",
     platforms: [.macOS(.v15)],

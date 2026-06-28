@@ -19,6 +19,13 @@ This isn't a clean architecture that merely inverts the *direction of dependenci
 
 The central `Kernel` does only two things: **send messages** and **manage shared memory**.
 
+> **And this is not just a claim — the compiler guarantees it.** Dependency and execution point the same way, and both are checked at build time:
+>
+> - **Dependency** — the [`Package.swift`](Package.swift) target graph *is* the enforcement. A target can only `import` the modules listed in its `dependencies`, so a back-edge (Kernel reaching for Presentation, Compute for Infrastructure, …) simply won't compile. Inner targets stay leaves; `concentric-arch` (App) is the only root.
+> - **Execution** — messages flow forward through the phantom-typed `Symbol<Payload, Output>` and the `Pipe` builder, whose chain constraint ("previous `Return` == next `Payload`") is checked at compile time. There is no return path.
+>
+> Dependency injection is used at the seams — Drivers bind handlers into the `KernelBuilder`, and the kernel is handed to composing handlers at call time — but it opens no hole in either axis: the same `Symbol` pins both ends, so the dynamic wiring still resolves to the one compiler-checked direction.
+
 ## 2. What it gives you
 
 - It makes **control visible as data**. In the old style — diving deep and bubbling back up through tangled dependencies — the control flow was hard to follow. Here it becomes a **single declaration**: `pipeline(...).tap(...).map(...).effect(...)`.
