@@ -279,6 +279,52 @@ func traceStateRingTrimsToCapAndKeepsSequence() {
     #expect(state.entries.map(\.id) == [7, 8, 9])              // monotonic seq survives trim
 }
 
+// MARK: - forest (flat trace → call trees for the monitor)
+
+@Test
+func forestGroupsChildrenUnderTheirParentInCallOrder() {
+    var state = TraceState()
+    let t = Date(timeIntervalSince1970: 0)
+    let root = UUID(), a = UUID(), b = UUID()
+    // post-order: children record before their parent
+    state.record(symbol: "a", verb: .next, span: a, parent: root, payload: nil, at: t, cap: 100)    // id 0
+    state.record(symbol: "b", verb: .next, span: b, parent: root, payload: nil, at: t, cap: 100)    // id 1
+    state.record(symbol: "root", verb: .next, span: root, parent: nil, payload: nil, at: t, cap: 100) // id 2
+
+    let forest = state.forest
+    #expect(forest.count == 1)
+    #expect(forest[0].entry.symbol == "root")
+    #expect(forest[0].children?.map { $0.entry.symbol } == ["a", "b"]) // ascending id = call order
+    #expect(forest[0].children?.allSatisfy { $0.children == nil } == true) // leaves
+    #expect(forest[0].children?.allSatisfy { $0.root == root } == true)    // tagged with the flow root
+}
+
+@Test
+func forestSeparatesConcurrentFlowsNewestFirst() {
+    var state = TraceState()
+    let t = Date(timeIntervalSince1970: 0)
+    state.record(symbol: "flowA", verb: .next, span: UUID(), parent: nil, payload: nil, at: t, cap: 100) // id 0
+    state.record(symbol: "flowB", verb: .next, span: UUID(), parent: nil, payload: nil, at: t, cap: 100) // id 1
+
+    let forest = state.forest
+    #expect(forest.count == 2)
+    #expect(forest.map { $0.entry.symbol } == ["flowB", "flowA"]) // highest id (newest) on top
+}
+
+@Test
+func forestSurfacesAnEntryWithAnAbsentParentAsItsOwnRoot() {
+    var state = TraceState()
+    let t = Date(timeIntervalSince1970: 0)
+    let missing = UUID(), child = UUID()
+    // parent span never recorded — in-flight (root not yet recorded) or evicted
+    state.record(symbol: "orphan", verb: .next, span: child, parent: missing, payload: nil, at: t, cap: 100)
+
+    let forest = state.forest
+    #expect(forest.count == 1)
+    #expect(forest[0].entry.symbol == "orphan")
+    #expect(forest[0].root == child) // its own span is the visible flow root
+}
+
 // MARK: - payload capture (DEBUG: opt-in via Kernel.recordsPayload)
 
 /// Collects the rendered payload the trace sink emits per invoke.

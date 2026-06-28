@@ -16,17 +16,6 @@ private let traceTimeFormatter: DateFormatter = {
     return formatter
 }()
 
-/// A trace entry placed in its call tree: how deep under its flow root it sits,
-/// and which root it belongs to. Derived per-read from the flat `span`/`parent`
-/// links so concurrent flows separate into distinct roots and nesting shows as
-/// depth.
-struct TraceRow: Identifiable {
-    let entry: TraceEntry
-    let depth: Int
-    let root: UUID
-    var id: Int { entry.id }
-}
-
 @Observable
 @MainActor
 final class KernelMonitorViewModel {
@@ -35,30 +24,10 @@ final class KernelMonitorViewModel {
 
     var entries: [TraceEntry] { kernel.buffer.read(TraceState.self).entries }
 
-    /// Each entry with its tree depth and flow root, rebuilt by walking the
-    /// `span → parent` links. Ancestors evicted from the bounded ring just stop
-    /// the walk early (the node reads as its own shallow root) — no crash, no
-    /// unbounded loop (guarded).
-    var rows: [TraceRow] {
-        let entries = self.entries
-        let parentOf: [UUID: UUID?] = Dictionary(
-            entries.map { ($0.span, $0.parent) },
-            uniquingKeysWith: { first, _ in first }
-        )
-        return entries.map { entry in
-            var depth = 0
-            var root = entry.span
-            var cursor = entry.parent
-            var guardCount = 0
-            while let span = cursor, guardCount < 256 {
-                depth += 1
-                root = span
-                cursor = parentOf[span] ?? nil
-                guardCount += 1
-            }
-            return TraceRow(entry: entry, depth: depth, root: root)
-        }
-    }
+    /// The flat trace rebuilt into a forest of call trees (see `TraceState.forest`):
+    /// each flow is one contiguous, foldable tree, so concurrent flows no longer
+    /// interleave row-by-row.
+    var forest: [TraceTree] { kernel.buffer.read(TraceState.self).forest }
 
     func clear() { kernel.buffer.mutate(TraceState.self) { $0.clear() } }
 }
@@ -93,27 +62,28 @@ struct KernelMonitorView: View {
             }
             .padding(8)
             Divider()
-            Table(Array(viewModel.rows.reversed())) { // newest first
-                TableColumn("#") { Text("\($0.entry.id)").monospacedDigit() }
-                    .width(48)
-                TableColumn("time") { Text(traceTimeFormatter.string(from: $0.entry.timestamp)).monospacedDigit() }
-                    .width(96)
-                TableColumn("flow") { Text(rootTag($0.root)).font(.system(.body, design: .monospaced)).foregroundStyle(.secondary) }
-                    .width(64)
-                TableColumn("symbol") { row in
-                    Text(row.entry.symbol)
-                        .font(.system(.body, design: .monospaced))
-                        .padding(.leading, CGFloat(row.depth) * 14)
+            // Hierarchical Table: `children` drives the disclosure outline, so the
+            // call tree indents in the leading (symbol) column and each flow folds
+            // independently. Expansion is keyed by the stable `entry.id`.
+            Table(viewModel.forest, children: \.children) {
+                TableColumn("symbol") { (node: TraceTree) in
+                    Text(node.entry.symbol).font(.system(.body, design: .monospaced))
                 }
-                TableColumn("verb") { Text($0.entry.verb.rawValue).foregroundStyle(color(for: $0.entry.verb)) }
+                TableColumn("#") { (node: TraceTree) in Text("\(node.entry.id)").monospacedDigit() }
+                    .width(48)
+                TableColumn("time") { (node: TraceTree) in Text(traceTimeFormatter.string(from: node.entry.timestamp)).monospacedDigit() }
+                    .width(96)
+                TableColumn("flow") { (node: TraceTree) in Text(rootTag(node.root)).font(.system(.body, design: .monospaced)).foregroundStyle(.secondary) }
                     .width(64)
-                TableColumn("payload") { row in
-                    Text(row.entry.payload ?? "—")
+                TableColumn("verb") { (node: TraceTree) in Text(node.entry.verb.rawValue).foregroundStyle(color(for: node.entry.verb)) }
+                    .width(64)
+                TableColumn("payload") { (node: TraceTree) in
+                    Text(node.entry.payload ?? "—")
                         .font(.system(.body, design: .monospaced))
-                        .foregroundStyle(row.entry.payload == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(node.entry.payload == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
                         .lineLimit(1)
                         .truncationMode(.tail)
-                        .help(row.entry.payload ?? "")
+                        .help(node.entry.payload ?? "")
                 }
             }
         }
