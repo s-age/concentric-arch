@@ -16,6 +16,17 @@ private let traceTimeFormatter: DateFormatter = {
     return formatter
 }()
 
+/// A trace entry placed in its call tree: how deep under its flow root it sits,
+/// and which root it belongs to. Derived per-read from the flat `span`/`parent`
+/// links so concurrent flows separate into distinct roots and nesting shows as
+/// depth.
+struct TraceRow: Identifiable {
+    let entry: TraceEntry
+    let depth: Int
+    let root: UUID
+    var id: Int { entry.id }
+}
+
 @Observable
 @MainActor
 final class KernelMonitorViewModel {
@@ -23,8 +34,38 @@ final class KernelMonitorViewModel {
     init(kernel: Kernel) { self.kernel = kernel }
 
     var entries: [TraceEntry] { kernel.buffer.read(TraceState.self).entries }
+
+    /// Each entry with its tree depth and flow root, rebuilt by walking the
+    /// `span → parent` links. Ancestors evicted from the bounded ring just stop
+    /// the walk early (the node reads as its own shallow root) — no crash, no
+    /// unbounded loop (guarded).
+    var rows: [TraceRow] {
+        let entries = self.entries
+        let parentOf: [UUID: UUID?] = Dictionary(
+            entries.map { ($0.span, $0.parent) },
+            uniquingKeysWith: { first, _ in first }
+        )
+        return entries.map { entry in
+            var depth = 0
+            var root = entry.span
+            var cursor = entry.parent
+            var guardCount = 0
+            while let span = cursor, guardCount < 256 {
+                depth += 1
+                root = span
+                cursor = parentOf[span] ?? nil
+                guardCount += 1
+            }
+            return TraceRow(entry: entry, depth: depth, root: root)
+        }
+    }
+
     func clear() { kernel.buffer.mutate(TraceState.self) { $0.clear() } }
 }
+
+/// Short, stable label for a flow root — the leading hex of its UUID. Two
+/// concurrent flows show different tags, so the eye groups a tree at a glance.
+private func rootTag(_ id: UUID) -> String { String(id.uuidString.prefix(6)) }
 
 struct KernelMonitorView: View {
     @State private var viewModel: KernelMonitorViewModel
@@ -45,13 +86,19 @@ struct KernelMonitorView: View {
             }
             .padding(8)
             Divider()
-            Table(Array(viewModel.entries.reversed())) { // newest first
-                TableColumn("#") { Text("\($0.id)").monospacedDigit() }
+            Table(Array(viewModel.rows.reversed())) { // newest first
+                TableColumn("#") { Text("\($0.entry.id)").monospacedDigit() }
                     .width(48)
-                TableColumn("time") { Text(traceTimeFormatter.string(from: $0.timestamp)).monospacedDigit() }
+                TableColumn("time") { Text(traceTimeFormatter.string(from: $0.entry.timestamp)).monospacedDigit() }
                     .width(96)
-                TableColumn("symbol") { Text($0.symbol).font(.system(.body, design: .monospaced)) }
-                TableColumn("verb") { Text($0.verb.rawValue).foregroundStyle(color(for: $0.verb)) }
+                TableColumn("flow") { Text(rootTag($0.root)).font(.system(.body, design: .monospaced)).foregroundStyle(.secondary) }
+                    .width(64)
+                TableColumn("symbol") { row in
+                    Text(row.entry.symbol)
+                        .font(.system(.body, design: .monospaced))
+                        .padding(.leading, CGFloat(row.depth) * 14)
+                }
+                TableColumn("verb") { Text($0.entry.verb.rawValue).foregroundStyle(color(for: $0.entry.verb)) }
                     .width(64)
             }
         }

@@ -79,10 +79,10 @@ struct ConcentricArchApp: App {
                 onError: { error in
                     await buffer.mutate(AppErrorState.self) { $0.message = error.localizedDescription }
                 },
-                onTrace: { symbol, verb, at in
+                onTrace: { symbol, verb, span, parent, at in
                     #if DEBUG
                     await buffer.mutate(TraceState.self) {
-                        $0.record(symbol: symbol, verb: verb, at: at, cap: 300)
+                        $0.record(symbol: symbol, verb: verb, span: span, parent: parent, at: at, cap: 300)
                     }
                     #endif
                 }
