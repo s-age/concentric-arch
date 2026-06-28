@@ -67,7 +67,7 @@ package final class KernelBuilder {
     package func build(
         buffer: Buffer,
         onError: @escaping @Sendable (any Error) async -> Void = { _ in },
-        onTrace: @escaping @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ at: Date) async -> Void = { _, _, _, _, _ in }
+        onTrace: @escaping @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void = { _, _, _, _, _, _ in }
     ) -> Kernel {
         Kernel(handlers: handlers, buffer: buffer, errorSink: onError, traceSink: onTrace)
     }
@@ -95,8 +95,9 @@ package final class Kernel: Sendable {
     /// Where each symbol invocation is recorded (DEBUG only) — wired by App to
     /// the buffer's `TraceState`. No-op by default, so release and tests pay
     /// nothing. `span` is the node `invoke` opened; `parent` is the enclosing
-    /// invoke's span (`nil` at a flow root).
-    private let traceSink: @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ at: Date) async -> Void
+    /// invoke's span (`nil` at a flow root); `payload` is the rendered input, or
+    /// `nil` when capture was toggled off.
+    private let traceSink: @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void
 
     #if DEBUG
     /// Ambient span of the currently-executing `invoke`, propagated down the
@@ -107,13 +108,35 @@ package final class Kernel: Sendable {
     /// means no enclosing invoke: the node is a flow root. This is how the kernel
     /// rebuilds, as data, the call tree the stack would have given for free.
     @TaskLocal static var span: UUID?
+
+    /// Runtime toggle for capturing each invoke's input payload into the trace.
+    /// Off by default, so the common path pays only a bool load; turning it on
+    /// opts into a synchronous `String(describing:)` per invoke. A process-global
+    /// flag read on the hot path — deliberately *not* in the `@MainActor` buffer,
+    /// which would hop every invoke onto the main actor and serialize them. The
+    /// monitor's toggle binds straight to it. The race on a lone debug bool is
+    /// benign (a flip may catch one in-flight invoke either way), so
+    /// `nonisolated(unsafe)` rather than the weight of an atomic.
+    nonisolated(unsafe) package static var recordsPayload = false
+
+    /// Best-effort, length-capped rendering of an invoke's input. Built eagerly
+    /// at the call site because `payload` is `Any` — neither `Sendable` nor
+    /// stable, so it can't be stashed and described later (a reference type could
+    /// mutate, or refuse to cross actors). The cap bounds what we *store*, not
+    /// what `String(describing:)` costs to *build* — a huge payload is heavy to
+    /// render regardless; `recordsPayload` is the cost guard, the cap is hygiene.
+    package static func describePayload(_ payload: Any, cap: Int = 256) -> String {
+        let full = String(describing: payload)
+        let head = full.prefix(cap)
+        return full.dropFirst(cap).isEmpty ? String(head) : String(head) + "…"
+    }
     #endif
 
     fileprivate init(
         handlers: [String: @Sendable (Kernel, Any) async throws -> Verb<Any>],
         buffer: Buffer,
         errorSink: @escaping @Sendable (any Error) async -> Void,
-        traceSink: @escaping @Sendable (String, TraceVerb, UUID, UUID?, Date) async -> Void
+        traceSink: @escaping @Sendable (String, TraceVerb, UUID, UUID?, String?, Date) async -> Void
     ) {
         self.handlers = handlers
         self.buffer = buffer
@@ -140,10 +163,14 @@ package final class Kernel: Sendable {
         #if DEBUG
         let parent = Kernel.span
         let span = UUID()
+        // Render the input *before* the handler runs (it is the entry value, and
+        // a handler may mutate a reference payload). Skipped to a bare bool load
+        // unless payload capture is toggled on.
+        let payloadRepr = Kernel.recordsPayload ? Kernel.describePayload(payload) : nil
         let verb = try await Kernel.$span.withValue(span) {
             try await handler(self, payload)
         }
-        await traceSink(id, TraceVerb(verb), span, parent, Date())
+        await traceSink(id, TraceVerb(verb), span, parent, payloadRepr, Date())
         return verb
         #else
         return try await handler(self, payload)
