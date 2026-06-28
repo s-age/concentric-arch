@@ -190,7 +190,7 @@ func invokeRecordsSymbolAndVerbIntoTheTrace() async throws {
         builder.register(guarded) { n -> Verb<Int> in n < 0 ? .fail(Boom()) : .next(n * 2) }
         return builder.build(
             buffer: BufferBuilder().build(),
-            onTrace: { symbol, verb, _, _, _ in await probe.hit("\(symbol):\(verb.rawValue)") }
+            onTrace: { symbol, verb, _, _, _, _ in await probe.hit("\(symbol):\(verb.rawValue)") }
         )
     }
 
@@ -231,7 +231,7 @@ func invokeBuildsACallTreeFromSpanAndParent() async throws {
         }
         return builder.build(
             buffer: BufferBuilder().build(),
-            onTrace: { symbol, _, span, parent, _ in await collector.add(symbol, span, parent) }
+            onTrace: { symbol, _, span, parent, _, _ in await collector.add(symbol, span, parent) }
         )
     }
 
@@ -256,7 +256,7 @@ func concurrentCallsSeparateIntoDistinctRoots() async throws {
         builder.register(increment) { $0 + 1 }
         return builder.build(
             buffer: BufferBuilder().build(),
-            onTrace: { symbol, _, span, parent, _ in await collector.add(symbol, span, parent) }
+            onTrace: { symbol, _, span, parent, _, _ in await collector.add(symbol, span, parent) }
         )
     }
 
@@ -274,9 +274,51 @@ func concurrentCallsSeparateIntoDistinctRoots() async throws {
 func traceStateRingTrimsToCapAndKeepsSequence() {
     var state = TraceState()
     let epoch = Date(timeIntervalSince1970: 0)
-    for n in 0..<10 { state.record(symbol: "s\(n)", verb: .next, span: UUID(), parent: nil, at: epoch, cap: 3) }
+    for n in 0..<10 { state.record(symbol: "s\(n)", verb: .next, span: UUID(), parent: nil, payload: nil, at: epoch, cap: 3) }
     #expect(state.entries.map(\.symbol) == ["s7", "s8", "s9"]) // oldest dropped
     #expect(state.entries.map(\.id) == [7, 8, 9])              // monotonic seq survives trim
+}
+
+// MARK: - payload capture (DEBUG: opt-in via Kernel.recordsPayload)
+
+/// Collects the rendered payload the trace sink emits per invoke.
+private actor PayloadCollector {
+    struct Record { let symbol: String; let payload: String? }
+    private(set) var records: [Record] = []
+    func add(_ symbol: String, _ payload: String?) { records.append(Record(symbol: symbol, payload: payload)) }
+}
+
+@Test
+func describePayloadRendersAndCapsLength() {
+    #expect(Kernel.describePayload("hi", cap: 10) == "hi")                 // shorter than cap: untouched
+    #expect(Kernel.describePayload(42) == "42")                           // non-String Any renders fine
+    let long = String(repeating: "x", count: 50)
+    #expect(Kernel.describePayload(long, cap: 10) == String(repeating: "x", count: 10) + "…") // capped + ellipsis
+}
+
+@Test
+func invokeCapturesInputPayloadOnlyWhileTheToggleIsOn() async throws {
+    // One test owns the global flag (set/reset here) so the off→nil assertion
+    // can't race another test flipping it on.
+    let collector = PayloadCollector()
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(increment) { $0 + 1 }
+        return builder.build(
+            buffer: BufferBuilder().build(),
+            onTrace: { symbol, _, _, _, payload, _ in await collector.add(symbol, payload) }
+        )
+    }
+
+    Kernel.recordsPayload = false
+    _ = try await kernel.call(increment, 41)   // off → not rendered
+
+    Kernel.recordsPayload = true
+    defer { Kernel.recordsPayload = false }
+    _ = try await kernel.call(increment, 99)   // on → rendered
+
+    let records = await collector.records
+    #expect(records.map(\.payload) == [nil, "99"])
 }
 
 // MARK: - run (forward-only, no return path)

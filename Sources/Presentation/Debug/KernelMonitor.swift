@@ -79,6 +79,13 @@ struct KernelMonitorView: View {
             HStack {
                 Text("Kernel Monitor").font(.headline)
                 Spacer()
+                Toggle("payload", isOn: Binding(
+                    get: { Kernel.recordsPayload },
+                    set: { Kernel.recordsPayload = $0 }
+                ))
+                .toggleStyle(.switch)
+                .controlSize(.small)
+                .help("Capture each invoke's input payload (off by default — adds a String(describing:) per call)")
                 Text("\(viewModel.entries.count)")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -100,6 +107,14 @@ struct KernelMonitorView: View {
                 }
                 TableColumn("verb") { Text($0.entry.verb.rawValue).foregroundStyle(color(for: $0.entry.verb)) }
                     .width(64)
+                TableColumn("payload") { row in
+                    Text(row.entry.payload ?? "—")
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(row.entry.payload == nil ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help(row.entry.payload ?? "")
+                }
             }
         }
         .frame(minWidth: 480, minHeight: 320)

@@ -30,6 +30,10 @@ package struct TraceEntry: Sendable, Identifiable {
     /// The enclosing invoke's span, or `nil` if this is a flow root. Lets the
     /// monitor rebuild the call tree the stack would have given for free.
     package let parent: UUID?
+    /// Rendered input payload, or `nil` when capture was toggled off at record
+    /// time. Output is not recorded: forward-only means a node's output is the
+    /// next node's input, so it is read off the successor. See `Kernel.recordsPayload`.
+    package let payload: String?
     package let timestamp: Date
 }
 
@@ -42,8 +46,8 @@ package struct TraceState: Sendable {
 
     package init() {}
 
-    package mutating func record(symbol: String, verb: TraceVerb, span: UUID, parent: UUID?, at timestamp: Date, cap: Int) {
-        entries.append(TraceEntry(id: nextID, symbol: symbol, verb: verb, span: span, parent: parent, timestamp: timestamp))
+    package mutating func record(symbol: String, verb: TraceVerb, span: UUID, parent: UUID?, payload: String?, at timestamp: Date, cap: Int) {
+        entries.append(TraceEntry(id: nextID, symbol: symbol, verb: verb, span: span, parent: parent, payload: payload, timestamp: timestamp))
         nextID += 1
         if entries.count > cap { entries.removeFirst(entries.count - cap) }
     }
