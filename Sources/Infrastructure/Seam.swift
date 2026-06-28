@@ -6,13 +6,13 @@ import Contract
 //
 // SwiftData's `@Model` / `@ModelActor` macros synthesise `internal` witnesses
 // (`id`, `modelContainer`, `modelExecutor`), so the model classes and the
-// @ModelActor repositories cannot themselves be `package` — they would violate
+// @ModelActor stores cannot themselves be `package` — they would violate
 // "witness must be as accessible as its type". Instead we keep all SwiftData
 // types internal to this module and expose a narrow package surface: protocols
 // the Driver can hold, plus factories that build the concrete types here, where
 // the internal initialisers are visible.
 
-package protocol SlideshowStore: Sendable {
+package protocol SlideshowStoring: Sendable {
     func fetchAll() async throws -> [Slideshow]
     func fetch(id: UUID) async throws -> Slideshow?
     func save(_ slideshow: Slideshow) async throws
@@ -24,7 +24,7 @@ package protocol ConfigStoring: Sendable {
     func save(_ config: SlideshowConfig) async throws
 }
 
-extension SlideshowRepository: SlideshowStore {}
+extension SlideshowStore: SlideshowStoring {}
 extension ConfigStore: ConfigStoring {}
 
 /// Builds the SwiftData container with the app's schema. The `@Model` types stay
@@ -37,8 +37,8 @@ package func makeModelContainer(url: URL) throws -> ModelContainer {
     )
 }
 
-package func makeSlideshowStore(_ container: ModelContainer) -> any SlideshowStore {
-    SlideshowRepository(modelContainer: container)
+package func makeSlideshowStore(_ container: ModelContainer) -> any SlideshowStoring {
+    SlideshowStore(modelContainer: container)
 }
 
 package func makeConfigStore(_ container: ModelContainer) -> any ConfigStoring {

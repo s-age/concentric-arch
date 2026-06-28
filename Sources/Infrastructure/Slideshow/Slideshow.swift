@@ -3,7 +3,7 @@ import SwiftData
 import Contract
 
 @ModelActor
-actor SlideshowRepository {
+actor SlideshowStore {
     func fetchAll() async throws -> [Slideshow] {
         try modelContext.fetch(FetchDescriptor<SlideshowModel>()).map { slideshow(from: $0) }
     }
