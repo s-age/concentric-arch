@@ -123,3 +123,7 @@ swift build                 # build
 swift test                  # tests for the Kernel's compose pipeline
 ./Scripts/build.sh          # bundle into concentric-arch.app for distribution
 ```
+
+## License
+
+[MIT](LICENSE) © s-age
