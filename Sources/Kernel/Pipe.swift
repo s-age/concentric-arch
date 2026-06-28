@@ -153,7 +153,7 @@ extension Kernel {
     }
 
     /// Forward-only drive: run the pipe for its effects and in-pipe verbs, then
-    /// discard the final value — there is no return path (復路). Results are
+    /// discard the final value — there is no return path. Results are
     /// published through `.tap`/`.effect` (buffer writes); only
     /// `.next`/`.abort`/`.divert`/`.fail` steer the flow. Because nothing is
     /// returned, `.abort`/`.divert` carry no output type and the boundary cast

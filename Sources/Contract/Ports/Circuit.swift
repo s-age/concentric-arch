@@ -8,7 +8,7 @@ import Kernel
 /// but holds no domain logic itself. Handlers live in `Driver/Circuit/`.
 package enum Circuit {
     package enum Slideshow {
-        // Forward-only commands: no return path (復路). They publish into the
+        // Forward-only commands: no return path. They publish into the
         // buffer (`LibraryState`) and Presentation observes it — see `kernel.run`.
         package static let create       = Symbol<CreateSlideshowPayload, Void>("Circuit.Slideshow.create")
         package static let update       = Symbol<UpdateSlideshowPayload, Void>("Circuit.Slideshow.update")
