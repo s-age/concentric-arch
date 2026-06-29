@@ -50,6 +50,18 @@ final class KernelMonitorViewModel {
         history.snapshot(forRoot: rootSpan(for: entry))
     }
 
+    /// Whether a past snapshot is currently reflected into the live app.
+    var isPreviewing: Bool { kernel.buffer.read(TimeTravelState.self).previewRoot != nil }
+
+    /// Reflect a snapshot into the live buffer (freezes the app behind a banner);
+    /// repeated calls scrub between snapshots without leaving the preview.
+    func preview(_ snapshot: BufferSnapshot) {
+        kernel.previewTimeTravel(root: snapshot.root, image: snapshot.image)
+    }
+
+    /// Return the live app to the present.
+    func exitPreview() { kernel.exitTimeTravel() }
+
     func clear() { kernel.buffer.mutate(TraceState.self) { $0.clear() } }
 }
 
@@ -71,6 +83,9 @@ struct KernelMonitorView: View {
     @State private var selection: TraceTree.ID?
     /// Which lens the lower pane shows for the selected row.
     @State private var inspectorTab: InspectorTab = .payload
+    /// When on, selecting a trace row reflects its snapshot into the live app
+    /// (time-travel follows selection) instead of needing the explicit button.
+    @State private var followsSelection = true
 
     init(viewModel: KernelMonitorViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -95,6 +110,10 @@ struct KernelMonitorView: View {
                 .toggleStyle(.switch)
                 .controlSize(.small)
                 .help("Capture invoke payloads and command-boundary buffer snapshots (off by default — feeds the Payload and Buffer tabs / time-travel)")
+                Toggle("follow", isOn: $followsSelection)
+                    .toggleStyle(.switch)
+                    .controlSize(.small)
+                    .help("Reflect the selected flow's state into the live app automatically (time-travel follows selection)")
                 Text("\(viewModel.entries.count)")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -113,6 +132,23 @@ struct KernelMonitorView: View {
             }
         }
         .frame(minWidth: 480, minHeight: 320)
+        // Time-travel follows selection: reflect the selected flow's snapshot into
+        // the live app, scrubbing as selection moves; a row with no snapshot (or no
+        // selection) returns to the present.
+        .onChange(of: selection) { _, _ in reflectSelectionIfFollowing() }
+        .onChange(of: followsSelection) { _, follows in
+            if follows { reflectSelectionIfFollowing() } else { viewModel.exitPreview() }
+        }
+    }
+
+    /// Drive the live preview from the current selection when "follow" is on.
+    private func reflectSelectionIfFollowing() {
+        guard followsSelection else { return }
+        if let entry = selectedEntry, let snapshot = viewModel.snapshot(for: entry) {
+            viewModel.preview(snapshot)
+        } else {
+            viewModel.exitPreview()
+        }
     }
 
     // Hierarchical Table: `children` drives the disclosure outline, so the call
@@ -202,6 +238,19 @@ struct KernelMonitorView: View {
                             Text("flow \(rootTag(snapshot.root))").font(.system(.callout, design: .monospaced)).bold()
                             Text("#\(snapshot.id)").foregroundStyle(.secondary).monospacedDigit()
                             Text(traceTimeFormatter.string(from: snapshot.timestamp)).foregroundStyle(.secondary).monospacedDigit()
+                            Spacer()
+                            // Reflect this snapshot into the live app (visual preview):
+                            // the main window freezes on the past state until "Return".
+                            // With "follow" on, selection already drives this, so only
+                            // the exit is needed; with it off, offer the manual reflect.
+                            if viewModel.isPreviewing {
+                                Button("Return to present") { selection = nil; viewModel.exitPreview() }
+                                    .controlSize(.small)
+                            } else if !followsSelection {
+                                Button("Reflect to app") { viewModel.preview(snapshot) }
+                                    .controlSize(.small)
+                                    .help("Write this snapshot into the live buffer and freeze the app on it (infra is untouched — visual preview only)")
+                            }
                         }
                         ForEach(snapshot.stores) { dump in
                             VStack(alignment: .leading, spacing: 2) {

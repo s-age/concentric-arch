@@ -25,14 +25,22 @@ package struct StoreDump: Sendable, Identifiable {
 /// selecting any trace row finds its flow root, and the snapshot for that root is
 /// the world *as of* that command. The kernel-level counterpart of `TraceEntry`,
 /// but state instead of control.
-package struct BufferSnapshot: Sendable, Identifiable {
+///
+/// Not `Sendable`: `image` carries erased `Any` values for live-restore. The
+/// history lives only on the main actor (written by the snapshot sink, read by
+/// the monitor), so it never crosses actors.
+package struct BufferSnapshot: Identifiable {
     /// Monotonic sequence assigned on record (record order).
     package let id: Int
     /// Flow-root span of the command that produced this snapshot — the join key
     /// to the trace forest's `TraceTree.root`.
     package let root: UUID
-    /// The captured stores, in a stable order fixed by the snapshot sink.
+    /// The captured stores rendered to text, in a stable order — the Buffer tab's
+    /// read-only display.
     package let stores: [StoreDump]
+    /// Erased typed copy of the same stores, for writing back into the live buffer
+    /// (the "reflect to app" preview). Display uses `stores`; restore uses this.
+    package let image: BufferImage
     package let timestamp: Date
 }
 
@@ -42,14 +50,14 @@ package struct BufferSnapshot: Sendable, Identifiable {
 ///
 /// The trace gives the *control* history at invoke granularity; this gives the
 /// *state* history at command granularity. They join at the flow root.
-package struct BufferHistoryState: Sendable {
+package struct BufferHistoryState {
     package private(set) var snapshots: [BufferSnapshot] = []
     private var nextID = 0
 
     package init() {}
 
-    package mutating func record(root: UUID, stores: [StoreDump], at timestamp: Date, cap: Int) {
-        snapshots.append(BufferSnapshot(id: nextID, root: root, stores: stores, timestamp: timestamp))
+    package mutating func record(root: UUID, stores: [StoreDump], image: BufferImage, at timestamp: Date, cap: Int) {
+        snapshots.append(BufferSnapshot(id: nextID, root: root, stores: stores, image: image, timestamp: timestamp))
         nextID += 1
         if snapshots.count > cap { snapshots.removeFirst(snapshots.count - cap) }
     }
@@ -64,4 +72,22 @@ package struct BufferHistoryState: Sendable {
     package mutating func clear() {
         snapshots.removeAll()
     }
+}
+
+// MARK: - Time-travel preview
+
+/// Live-restore preview state (DEBUG): while `previewRoot` is set, the live buffer
+/// is showing a past snapshot and `stashedPresent` holds the real present so it
+/// can be put back on exit. Observed by both the monitor and the main window (to
+/// freeze input behind a banner). Held in `kernel.buffer` like any other state.
+///
+/// Not `Sendable` (`stashedPresent` is an erased `BufferImage`); it only ever
+/// lives and mutates on the main actor.
+package struct TimeTravelState {
+    /// The flow root currently being previewed, or `nil` when live.
+    package var previewRoot: UUID?
+    /// The present state captured at preview entry, restored verbatim on exit.
+    package var stashedPresent: BufferImage?
+
+    package init() {}
 }

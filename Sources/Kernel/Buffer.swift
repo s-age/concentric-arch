@@ -21,6 +21,29 @@ package final class BufferStore<State> {
     fileprivate init(_ value: State) { self.value = value }
 }
 
+/// Type-erased view of a store, for the buffer to capture/restore every cell
+/// without knowing its `State` — the basis of time-travel's snapshot/restore.
+/// `value` is `Any` here; the `as?` round-trip is safe because `Buffer` only ever
+/// hands a cell back the value it took from that same cell (keyed by type).
+@MainActor
+fileprivate protocol AnyBufferStore: AnyObject {
+    func captureValue() -> Any
+    func restoreValue(_ value: Any)
+}
+
+extension BufferStore: AnyBufferStore {
+    fileprivate func captureValue() -> Any { value }
+    fileprivate func restoreValue(_ value: Any) {
+        guard let typed = value as? State else { return }
+        self.value = typed
+    }
+}
+
+/// An erased copy of selected buffer cells — one captured value per store type.
+/// Non-`Sendable` (`Any`) and only ever produced/consumed on the main actor, so
+/// it never crosses actors. Used to stash the present and write back the past.
+package typealias BufferImage = [ObjectIdentifier: Any]
+
 // MARK: - Builder
 
 /// Collects the buffer's named containers during app wiring — the state-side
@@ -90,5 +113,27 @@ package final class Buffer {
     /// concern, not an atomicity one — see `fetchSlideshows`.
     package func mutate<State>(_ type: State.Type, _ transform: (inout State) -> Void) {
         transform(&store(type).value)
+    }
+
+    // MARK: - Snapshot / restore (time-travel)
+
+    /// Erased copy of the named cells' current values. The caller picks which
+    /// stores (domain state only — never `TraceState`/history, which must survive
+    /// a rewind). Returns one entry per key whose store exists.
+    package func capture(_ keys: Set<ObjectIdentifier>) -> BufferImage {
+        var image: BufferImage = [:]
+        for key in keys {
+            if let cell = stores[key] as? AnyBufferStore { image[key] = cell.captureValue() }
+        }
+        return image
+    }
+
+    /// Write an erased image back into the matching cells. Each write hits the
+    /// `@Observable` value, so SwiftUI re-renders — this is what makes the live app
+    /// reflect the past. Only the keys present in `image` are touched.
+    package func restore(_ image: BufferImage) {
+        for (key, value) in image {
+            (stores[key] as? AnyBufferStore)?.restoreValue(value)
+        }
     }
 }

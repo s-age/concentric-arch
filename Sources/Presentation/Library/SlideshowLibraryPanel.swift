@@ -134,6 +134,12 @@ private struct LibraryRow: View {
         .onChange(of: focus.wrappedValue) { _, focused in
             if focused != slideshow.id { commit() }
         }
+        // The field is local @State (seeded once), so an external change to the
+        // model — a time-travel restore, or a rename from another surface — would
+        // otherwise not show. Mirror it in, but never while the user is editing.
+        .onChange(of: slideshow.name) { _, newName in
+            if focus.wrappedValue != slideshow.id { name = newName }
+        }
     }
 
     /// Commits a non-empty rename; reverts to the stored name when cleared.
