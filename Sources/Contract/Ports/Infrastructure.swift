@@ -1,26 +1,30 @@
 import Foundation
 import Kernel
 
-/// Port declarations for the Infrastructure layer.
+/// Port declarations for the Infrastructure (storage) device.
 ///
-/// Caseless enums used purely as namespaces. They produce the
-/// `Infrastructure.Library.<method>` dotted path *without* requiring separate
-/// Swift modules — nesting is the single-target idiom for this.
+/// The two storing protocols are the device's operation surface and the single
+/// source of truth: `@callable` generates the typed `Symbol`s + wiring (the peer
+/// `SlideshowStoringCallable` / `ConfigStoringCallable` enums). The concrete
+/// stores live in the `Infrastructure` module (SwiftData `@ModelActor`, kept
+/// internal); they conform there and are injected as `any …Storing`.
 ///
-/// This is the *port* side of the wiring: it declares **what** can be called.
-/// The matching **how** lives in `Driver/Infrastructure/`, which binds each
-/// symbol to a concrete repository/store call. The payload/output types come
-/// from `Contract/Model/`, so this file depends only downward.
-package enum Infrastructure {
-    package enum Library {
-        package static let fetchAll = Symbol<Void, [Slideshow]>("Infrastructure.Library.fetchAll")
-        package static let fetch    = Symbol<UUID, Slideshow?>("Infrastructure.Library.fetch")
-        package static let save     = Symbol<Slideshow, Void>("Infrastructure.Library.save")
-        package static let delete   = Symbol<UUID, Void>("Infrastructure.Library.delete")
-    }
+/// The protocols live HERE rather than in Infrastructure so the generated symbols
+/// sit in Contract — letting Circuit call them through the mesh without depending
+/// on the Infrastructure module.
 
-    package enum Config {
-        package static let load = Symbol<Void, SlideshowConfig>("Infrastructure.Config.load")
-        package static let save = Symbol<SlideshowConfig, Void>("Infrastructure.Config.save")
-    }
+/// The slideshow repository surface.
+@callable("Infrastructure.Library")
+package protocol SlideshowStoring: Sendable {
+    func fetchAll() async throws -> [Slideshow]
+    func fetch(id: UUID) async throws -> Slideshow?
+    func save(_ slideshow: Slideshow) async throws
+    func delete(id: UUID) async throws
+}
+
+/// The config store surface.
+@callable("Infrastructure.Config")
+package protocol ConfigStoring: Sendable {
+    func load() async throws -> SlideshowConfig
+    func save(_ config: SlideshowConfig) async throws
 }

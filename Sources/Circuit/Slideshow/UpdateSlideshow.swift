@@ -4,7 +4,7 @@ import Contract
 /// Pipeline: `Infrastructure.Library.fetch ▶ require-exists ▶ Compute.Slideshow.update ▶ Infrastructure.Library.save ▶ buffer.replace`
 package func updateSlideshow(_ kernel: Kernel, _ payload: UpdateSlideshowPayload) async throws {
     try await kernel.run(
-        pipeline(Infrastructure.Library.fetch)                          // UUID -> Slideshow?
+        pipeline(SlideshowStoringCallable.fetch)                        // UUID -> Slideshow?
             .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
                 guard let existing else { return .fail(NotFoundError.slideshow(payload.id)) }
                 return .next(existing)
@@ -16,7 +16,7 @@ package func updateSlideshow(_ kernel: Kernel, _ payload: UpdateSlideshowPayload
                     localIdentifiers: payload.localIdentifiers
                 )
             }
-            .tap(Infrastructure.Library.save)                           // persist, keep the Slideshow flowing
+            .tap(SlideshowStoringCallable.save)                         // persist, keep the Slideshow flowing
             .map(SlideshowReturn.init(from:))                            // project -> SlideshowReturn
             .effect { kernel, result in                                 // publish to the buffer
                 await kernel.buffer.mutate(LibraryState.self) { state in

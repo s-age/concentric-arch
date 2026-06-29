@@ -8,21 +8,10 @@ import Contract
 // (`id`, `modelContainer`, `modelExecutor`), so the model classes and the
 // @ModelActor stores cannot themselves be `package` — they would violate
 // "witness must be as accessible as its type". Instead we keep all SwiftData
-// types internal to this module and expose a narrow package surface: protocols
-// the Driver can hold, plus factories that build the concrete types here, where
-// the internal initialisers are visible.
-
-package protocol SlideshowStoring: Sendable {
-    func fetchAll() async throws -> [Slideshow]
-    func fetch(id: UUID) async throws -> Slideshow?
-    func save(_ slideshow: Slideshow) async throws
-    func delete(id: UUID) async throws
-}
-
-package protocol ConfigStoring: Sendable {
-    func load() async throws -> SlideshowConfig
-    func save(_ config: SlideshowConfig) async throws
-}
+// types internal to this module and expose a narrow package surface: the concrete
+// stores conform to the `SlideshowStoring` / `ConfigStoring` protocols (declared
+// in Contract, where `@callable` generates their dispatch symbols), plus factories
+// that build the concrete types here, where the internal initialisers are visible.
 
 extension SlideshowStore: SlideshowStoring {}
 extension ConfigStore: ConfigStoring {}

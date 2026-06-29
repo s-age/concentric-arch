@@ -51,8 +51,12 @@ public struct CallableMacro: PeerMacro {
                 callArgs = ""
                 closureHead = "{ _ in "
             case 1:
-                payloadType = params.first!.type.trimmedDescription
-                callArgs = "$0"
+                let param = params.first!
+                payloadType = param.type.trimmedDescription
+                // Respect the external argument label: `_ p:` → `device.m($0)`,
+                // `id:` → `device.m(id: $0)`.
+                let label = param.firstName.text
+                callArgs = (label == "_") ? "$0" : "\(label): $0"
                 closureHead = "{ "
             default:
                 throw CallableMacroError("@callable: '\(name)' must take zero or one payload parameter")

@@ -1,5 +1,5 @@
 import Kernel
-import Infrastructure
+import Contract
 
 /// Wire every driver into the builder — the single entry point the App calls at
 /// startup. Infra-backed drivers take their store by argument; the compute and
