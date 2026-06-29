@@ -56,6 +56,7 @@ struct ConcentricArchApp: App {
             bufferBuilder.allocate(AppErrorState())
             #if DEBUG
             bufferBuilder.allocate(TraceState())
+            bufferBuilder.allocate(BufferHistoryState())
             #endif
 
             // Wire the Driver(port + repository) into the kernel so that
@@ -83,6 +84,25 @@ struct ConcentricArchApp: App {
                     #if DEBUG
                     await buffer.mutate(TraceState.self) {
                         $0.record(symbol: symbol, verb: verb, span: span, parent: parent, payload: payload, at: at, cap: 300)
+                    }
+                    #endif
+                },
+                // State side of time-travel: at each command boundary (flow root)
+                // render the domain stores to text and append to the snapshot ring.
+                // App owns the store list — the kernel stays state-agnostic, exactly
+                // as it does for the error and trace sinks. `TraceState`/
+                // `BufferHistoryState` are deliberately excluded (the trace and the
+                // history are not part of the world we rewind).
+                onSnapshot: { root, at in
+                    #if DEBUG
+                    let library = await buffer.read(LibraryState.self)
+                    let appError = await buffer.read(AppErrorState.self)
+                    let dumps = [
+                        StoreDump(name: "\(LibraryState.self)", value: String(describing: library)),
+                        StoreDump(name: "\(AppErrorState.self)", value: String(describing: appError)),
+                    ]
+                    await buffer.mutate(BufferHistoryState.self) {
+                        $0.record(root: root, stores: dumps, at: at, cap: 100)
                     }
                     #endif
                 }

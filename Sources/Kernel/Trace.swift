@@ -32,7 +32,7 @@ package struct TraceEntry: Sendable, Identifiable {
     package let parent: UUID?
     /// Rendered input payload, or `nil` when capture was toggled off at record
     /// time. Output is not recorded: forward-only means a node's output is the
-    /// next node's input, so it is read off the successor. See `Kernel.recordsPayload`.
+    /// next node's input, so it is read off the successor. See `Kernel.recordsInspection`.
     package let payload: String?
     package let timestamp: Date
 }

@@ -29,7 +29,35 @@ final class KernelMonitorViewModel {
     /// interleave row-by-row.
     var forest: [TraceTree] { kernel.buffer.read(TraceState.self).forest }
 
+    /// The recorded command-boundary buffer snapshots (state side of time-travel).
+    var history: BufferHistoryState { kernel.buffer.read(BufferHistoryState.self) }
+
+    /// The flow root that `entry` belongs to — walk the `parent` chain up until it
+    /// runs out (nil parent) or leaves the window (parent evicted). Matches
+    /// `TraceState.forest`'s root rule, so the span returned is the snapshot key.
+    func rootSpan(for entry: TraceEntry) -> UUID {
+        let bySpan = Dictionary(entries.map { ($0.span, $0) }, uniquingKeysWith: { a, _ in a })
+        var current = entry
+        while let parent = current.parent, let next = bySpan[parent] {
+            current = next
+        }
+        return current.span
+    }
+
+    /// The buffer state captured for the command the selected `entry` belongs to,
+    /// or `nil` if none was recorded (capture was off, or it was evicted).
+    func snapshot(for entry: TraceEntry) -> BufferSnapshot? {
+        history.snapshot(forRoot: rootSpan(for: entry))
+    }
+
     func clear() { kernel.buffer.mutate(TraceState.self) { $0.clear() } }
+}
+
+/// Which lens the lower "Visualize" pane shows for the selected row.
+private enum InspectorTab: String, CaseIterable, Identifiable {
+    case payload = "Payload"
+    case buffer = "Buffer"
+    var id: String { rawValue }
 }
 
 /// Short, stable label for a flow root — the leading hex of its UUID. Two
@@ -38,8 +66,11 @@ private func rootTag(_ id: UUID) -> String { String(id.uuidString.prefix(6)) }
 
 struct KernelMonitorView: View {
     @State private var viewModel: KernelMonitorViewModel
-    /// Row selected in the trace table; its full payload shows in the lower pane.
+    /// Row selected in the trace table; the lower pane inspects it. Selecting a
+    /// row is the time cursor: the Buffer tab shows the world as of its command.
     @State private var selection: TraceTree.ID?
+    /// Which lens the lower pane shows for the selected row.
+    @State private var inspectorTab: InspectorTab = .payload
 
     init(viewModel: KernelMonitorViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -57,13 +88,13 @@ struct KernelMonitorView: View {
             HStack {
                 Text("Kernel Monitor").font(.headline)
                 Spacer()
-                Toggle("payload", isOn: Binding(
-                    get: { Kernel.recordsPayload },
-                    set: { Kernel.recordsPayload = $0 }
+                Toggle("inspection", isOn: Binding(
+                    get: { Kernel.recordsInspection },
+                    set: { Kernel.recordsInspection = $0 }
                 ))
                 .toggleStyle(.switch)
                 .controlSize(.small)
-                .help("Capture each invoke's input payload (off by default — adds a String(describing:) per call)")
+                .help("Capture invoke payloads and command-boundary buffer snapshots (off by default — feeds the Payload and Buffer tabs / time-travel)")
                 Text("\(viewModel.entries.count)")
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
@@ -77,8 +108,8 @@ struct KernelMonitorView: View {
             VSplitView {
                 traceTable
                     .frame(minHeight: 160)
-                payloadDetail
-                    .frame(minHeight: 56, idealHeight: 120)
+                inspector
+                    .frame(minHeight: 80, idealHeight: 160)
             }
         }
         .frame(minWidth: 480, minHeight: 320)
@@ -110,8 +141,29 @@ struct KernelMonitorView: View {
         }
     }
 
-    // Lower pane: the selected entry's full payload, wrapped and selectable
-    // (the table column shows only a one-line preview).
+    // Lower pane ("Visualize"): a lens on the selected row. Payload is per-invoke
+    // (the row's input); Buffer is per-command (the world as of the row's flow
+    // root) — selecting an older row time-travels the Buffer tab to that point.
+    private var inspector: some View {
+        VStack(spacing: 0) {
+            Picker("Visualize", selection: $inspectorTab) {
+                ForEach(InspectorTab.allCases) { tab in Text(tab.rawValue).tag(tab) }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 6)
+            Divider()
+            switch inspectorTab {
+            case .payload: payloadDetail
+            case .buffer: bufferDetail
+            }
+        }
+    }
+
+    // Payload tab: the selected entry's full input, wrapped and selectable (the
+    // table column shows only a one-line preview).
     private var payloadDetail: some View {
         ScrollView {
             if let entry = selectedEntry {
@@ -121,7 +173,7 @@ struct KernelMonitorView: View {
                         Text(entry.verb.rawValue).foregroundStyle(color(for: entry.verb))
                         Text("#\(entry.id)").foregroundStyle(.secondary).monospacedDigit()
                     }
-                    Text(entry.payload ?? "Payload capture is off — switch the “payload” toggle on, then re-run, to show it here.")
+                    Text(entry.payload ?? "Capture is off — switch the “inspection” toggle on, then re-run, to show it here.")
                         .font(.system(.body, design: .monospaced))
                         .foregroundStyle(entry.payload == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
                         .textSelection(.enabled)
@@ -131,6 +183,46 @@ struct KernelMonitorView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
             } else {
                 Text("Select a row to inspect its payload")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(8)
+            }
+        }
+    }
+
+    // Buffer tab: the domain state as of the selected row's command boundary —
+    // the snapshot tagged with the row's flow root. This is the viewing side of
+    // time-travel: scrub the trace table and the world here rewinds with it.
+    private var bufferDetail: some View {
+        ScrollView {
+            if let entry = selectedEntry {
+                if let snapshot = viewModel.snapshot(for: entry) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            Text("flow \(rootTag(snapshot.root))").font(.system(.callout, design: .monospaced)).bold()
+                            Text("#\(snapshot.id)").foregroundStyle(.secondary).monospacedDigit()
+                            Text(traceTimeFormatter.string(from: snapshot.timestamp)).foregroundStyle(.secondary).monospacedDigit()
+                        }
+                        ForEach(snapshot.stores) { dump in
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(dump.name).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
+                                Text(dump.value)
+                                    .font(.system(.body, design: .monospaced))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                            }
+                        }
+                    }
+                    .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    Text("No buffer snapshot for this flow — switch the “inspection” toggle on, then re-run, to capture state at each command (older snapshots may have scrolled out of the window).")
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                }
+            } else {
+                Text("Select a row to inspect the buffer at its command")
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(8)
