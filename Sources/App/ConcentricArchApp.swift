@@ -22,6 +22,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
+#if DEBUG
+/// Multi-line, indented reflection of a value for the monitor's Buffer tab.
+/// `dump` walks the value with `Mirror`, so it needs no `Codable`/`CustomString`
+/// conformance — it pretty-prints any domain state as-is, which is why the
+/// snapshot sink keeps strings (rendered here) rather than typed values.
+private func prettyDump(_ value: Any) -> String {
+    var text = ""
+    dump(value, to: &text)
+    return text
+}
+#endif
+
 @main
 struct ConcentricArchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -57,6 +69,7 @@ struct ConcentricArchApp: App {
             #if DEBUG
             bufferBuilder.allocate(TraceState())
             bufferBuilder.allocate(BufferHistoryState())
+            bufferBuilder.allocate(TimeTravelState())
             #endif
 
             // Wire the Driver(port + repository) into the kernel so that
@@ -95,14 +108,26 @@ struct ConcentricArchApp: App {
                 // history are not part of the world we rewind).
                 onSnapshot: { root, at in
                     #if DEBUG
-                    let library = await buffer.read(LibraryState.self)
-                    let appError = await buffer.read(AppErrorState.self)
-                    let dumps = [
-                        StoreDump(name: "\(LibraryState.self)", value: String(describing: library)),
-                        StoreDump(name: "\(AppErrorState.self)", value: String(describing: appError)),
-                    ]
-                    await buffer.mutate(BufferHistoryState.self) {
-                        $0.record(root: root, stores: dumps, at: at, cap: 100)
+                    // One main-actor hop: read the domain stores, render them for
+                    // display *and* keep an erased typed copy for live-restore. Both
+                    // are built here so the non-Sendable `image` never leaves the
+                    // main actor. `TraceState`/`BufferHistoryState`/`TimeTravelState`
+                    // are excluded — the trace, the history, and the preview flag are
+                    // not part of the world we rewind.
+                    await MainActor.run {
+                        let library = buffer.read(LibraryState.self)
+                        let appError = buffer.read(AppErrorState.self)
+                        let dumps = [
+                            StoreDump(name: "\(LibraryState.self)", value: prettyDump(library)),
+                            StoreDump(name: "\(AppErrorState.self)", value: prettyDump(appError)),
+                        ]
+                        let image: BufferImage = [
+                            ObjectIdentifier(LibraryState.self): library,
+                            ObjectIdentifier(AppErrorState.self): appError,
+                        ]
+                        buffer.mutate(BufferHistoryState.self) {
+                            $0.record(root: root, stores: dumps, image: image, at: at, cap: 100)
+                        }
                     }
                     #endif
                 }
@@ -117,6 +142,7 @@ struct ConcentricArchApp: App {
             ContentView(
                 library: SlideshowLibraryViewModel(kernel: kernel),
                 error: GlobalErrorViewModel(kernel: kernel),
+                timeTravel: TimeTravelViewModel(kernel: kernel),
                 makeSlideshowPlayerViewModel: { slideshow in
                     SlideshowPlayerViewModel(slideshow: slideshow, kernel: kernel)
                 },

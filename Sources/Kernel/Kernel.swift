@@ -129,14 +129,21 @@ package final class Kernel: Sendable {
     /// in-flight invoke either way), so `nonisolated(unsafe)` rather than an atomic.
     nonisolated(unsafe) package static var recordsInspection = false
 
-    /// Best-effort, length-capped rendering of an invoke's input. Built eagerly
-    /// at the call site because `payload` is `Any` — neither `Sendable` nor
-    /// stable, so it can't be stashed and described later (a reference type could
-    /// mutate, or refuse to cross actors). The cap bounds what we *store*, not
-    /// what `String(describing:)` costs to *build* — a huge payload is heavy to
-    /// render regardless; `recordsInspection` is the cost guard, the cap is hygiene.
-    package static func describePayload(_ payload: Any, cap: Int = 256) -> String {
-        let full = String(describing: payload)
+    /// Best-effort, length-capped *pretty* rendering of an invoke's input. Built
+    /// eagerly at the call site because `payload` is `Any` — neither `Sendable`
+    /// nor stable, so it can't be stashed and pretty-printed later (a reference
+    /// type could mutate, or refuse to cross actors); the detail pane only ever
+    /// sees this string, never the live value. `dump` walks the value with
+    /// `Mirror`, so any payload type pretty-prints (indented, multi-line) with no
+    /// conformance — matching the Buffer tab. The cap bounds what we *store*, not
+    /// what rendering costs to *build* — a huge payload is heavy regardless;
+    /// `recordsInspection` is the cost guard, the cap is hygiene.
+    package static func describePayload(_ payload: Any, cap: Int = 1024) -> String {
+        var full = ""
+        dump(payload, to: &full)
+        // `dump` ends every value with a newline; drop it so a scalar payload
+        // ("- 42\n") doesn't carry a trailing blank line into the trace.
+        if full.hasSuffix("\n") { full.removeLast() }
         let head = full.prefix(cap)
         return full.dropFirst(cap).isEmpty ? String(head) : String(head) + "…"
     }
@@ -226,3 +233,42 @@ extension Kernel {
         try await call(symbol, ())
     }
 }
+
+#if DEBUG
+extension Kernel {
+    /// Preview a past snapshot: write its `image` into the live buffer so the app
+    /// renders the past. Visual only — infra (SwiftData) is untouched, so the
+    /// caller must also block input (the main window disables itself behind a
+    /// banner). Same chokepoint discipline as the rest of the kernel: restore is
+    /// the one operation that runs *backward*, so it is fenced here as a DEBUG
+    /// affordance, not a core capability.
+    ///
+    /// Enter-or-scrub: the *first* call stashes the real present and freezes the
+    /// command bus; later calls (selection moved to another flow) just swap in the
+    /// new image. Re-stashing on a scrub would capture the *displayed past* as the
+    /// present, so the stash is taken once and held until `exitTimeTravel`.
+    @MainActor
+    package func previewTimeTravel(root: UUID, image: BufferImage) {
+        if buffer.read(TimeTravelState.self).stashedPresent == nil {
+            let present = buffer.capture(Set(image.keys))
+            commands.suspend()
+            buffer.mutate(TimeTravelState.self) { $0.stashedPresent = present }
+        }
+        buffer.restore(image)
+        buffer.mutate(TimeTravelState.self) { $0.previewRoot = root }
+    }
+
+    /// Leave the preview: put the stashed present back and resume command draining.
+    /// No-op if no preview is active.
+    @MainActor
+    package func exitTimeTravel() {
+        guard let present = buffer.read(TimeTravelState.self).stashedPresent else { return }
+        buffer.restore(present)
+        commands.resumeDraining()
+        buffer.mutate(TimeTravelState.self) {
+            $0.previewRoot = nil
+            $0.stashedPresent = nil
+        }
+    }
+}
+#endif

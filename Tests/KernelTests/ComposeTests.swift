@@ -335,11 +335,15 @@ private actor PayloadCollector {
 }
 
 @Test
-func describePayloadRendersAndCapsLength() {
-    #expect(Kernel.describePayload("hi", cap: 10) == "hi")                 // shorter than cap: untouched
-    #expect(Kernel.describePayload(42) == "42")                           // non-String Any renders fine
+func describePayloadPrettyRendersAndCapsLength() {
+    // `dump` renders a scalar leaf as "- <value>"; the trailing newline is dropped.
+    #expect(Kernel.describePayload(42) == "- 42")
+    #expect(Kernel.describePayload("hi") == "- \"hi\"")
+    #expect(!Kernel.describePayload(42).contains("\n"))                   // no trailing blank line
     let long = String(repeating: "x", count: 50)
-    #expect(Kernel.describePayload(long, cap: 10) == String(repeating: "x", count: 10) + "…") // capped + ellipsis
+    let capped = Kernel.describePayload(long, cap: 10)
+    #expect(capped.hasSuffix("…"))                                       // over cap: truncated
+    #expect(capped.count == 11)                                          // 10 kept + the ellipsis
 }
 
 @Test
@@ -364,7 +368,7 @@ func invokeCapturesInputPayloadOnlyWhileTheToggleIsOn() async throws {
     _ = try await kernel.call(increment, 99)   // on → rendered
 
     let records = await collector.records
-    #expect(records.map(\.payload) == [nil, "99"])
+    #expect(records.map(\.payload) == [nil, "- 99"]) // dump renders the scalar leaf as "- 99"
 }
 
 // MARK: - run (forward-only, no return path)
