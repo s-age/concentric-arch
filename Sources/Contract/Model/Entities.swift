@@ -1,6 +1,10 @@
 import Foundation
 
-// MARK: - Domain Entities
+// MARK: - Entities
+//
+// The canonical, mutable value types for the app's nouns. Circuit/Compute
+// operate on these; the `…Return` projections in `Return.swift` are the
+// immutable, view-facing views of them.
 
 package struct Slide: Identifiable, Equatable, Sendable {
     package let id: UUID

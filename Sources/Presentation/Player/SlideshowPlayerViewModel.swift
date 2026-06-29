@@ -117,7 +117,7 @@ package final class SlideshowPlayerViewModel {
     }
 
     func next() async {
-        // View-cursor navigation over `displayedSlides`: no domain logic, so no
+        // View-cursor navigation over `displayedSlides`: no business logic, so no
         // kernel round-trip. `nil` = no more slides (end reached without loop).
         let count = displayedSlides.count
         let nextIndex: Int?

@@ -3,7 +3,7 @@ import Kernel
 import Contract
 import Compute
 
-/// The *driver* for the `Compute.Slideshow` port — pure domain logic, bound as
+/// The *driver* for the `Compute.Slideshow` port — pure business logic, bound as
 /// leaf handlers (`(P) -> O`, no kernel passed).
 ///
 /// Port references are qualified `Contract.Compute.…` because this file imports

@@ -1,15 +1,15 @@
 import Foundation
 import Contract
 
-/// Pure domain logic for building and transforming slideshows. No I/O, no kernel
+/// Pure business logic for building and transforming slideshows. No I/O, no kernel
 /// calls — a leaf computation. Wired into the kernel by `SlideshowComputeDriver`.
 package struct SlideshowCompute {
     package init() {}
 
     package func create(_ payload: CreateSlideshowPayload) -> Slideshow {
         let config = SlideshowConfig(
-            duration: payload.duration.toDomain,
-            transition: payload.transition.toDomain,
+            duration: payload.duration.toEntity,
+            transition: payload.transition.toEntity,
             loop: payload.loop
         )
         return Slideshow(
@@ -34,8 +34,8 @@ package struct SlideshowCompute {
     package func applyConfig(_ payload: ApplyConfigComputePayload) -> Slideshow {
         var updated = payload.current
         updated.config = SlideshowConfig(
-            duration: payload.duration.toDomain,
-            transition: payload.transition.toDomain,
+            duration: payload.duration.toEntity,
+            transition: payload.transition.toEntity,
             loop: payload.loop
         )
         return updated

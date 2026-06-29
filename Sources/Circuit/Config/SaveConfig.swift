@@ -4,8 +4,8 @@ import Contract
 /// Pipeline: `build ▶ Infrastructure.Config.save`
 package func saveConfig(_ kernel: Kernel, _ payload: SaveConfigPayload) async throws {
     let config = SlideshowConfig(
-        duration: payload.duration.toDomain,
-        transition: payload.transition.toDomain,
+        duration: payload.duration.toEntity,
+        transition: payload.transition.toEntity,
         loop: payload.loop
     )
     try await kernel.run(pipeline(Infrastructure.Config.save), config) // SlideshowConfig -> Void (forward-only)

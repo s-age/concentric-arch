@@ -5,7 +5,7 @@ import Kernel
 ///
 /// Circuit is "just a circuit": it routes between other devices via the kernel
 /// (`Compute.*` for logic, `Infrastructure.*` for I/O) and enforces flow rules,
-/// but holds no domain logic itself. Handlers live in `Driver/Circuit/`.
+/// but holds no business logic itself. Handlers live in `Driver/Circuit/`.
 package enum Circuit {
     package enum Slideshow {
         // Forward-only commands: no return path. They publish into the

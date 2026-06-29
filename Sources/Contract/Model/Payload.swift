@@ -2,7 +2,9 @@ import Foundation
 
 // MARK: - Payloads
 //
-// The input side of the Circuit ports — the argument to `kernel.call(Circuit.…)`.
+// The input side of the ports — the argument to `kernel.call(…)`. Circuit ports
+// take the request-shaped payloads below; Compute ports additionally take the
+// transform payloads at the end, which bundle the current entity with the change.
 
 // MARK: Slideshow
 
@@ -87,6 +89,37 @@ package struct AddDroppedFilesPayload {
     package init(urls: [URL], existingIdentifiers: [String]) {
         self.urls = urls
         self.existingIdentifiers = existingIdentifiers
+    }
+}
+
+// MARK: Compute transforms
+//
+// Transform ops bundle the current `Slideshow` entity with the requested change,
+// since Compute is stateless and receives everything it needs as data.
+
+package struct UpdateSlideshowComputePayload {
+    package let current: Slideshow
+    package let name: String
+    package let localIdentifiers: [String]
+
+    package init(current: Slideshow, name: String, localIdentifiers: [String]) {
+        self.current = current
+        self.name = name
+        self.localIdentifiers = localIdentifiers
+    }
+}
+
+package struct ApplyConfigComputePayload {
+    package let current: Slideshow
+    package let duration: SlideDurationReturn
+    package let transition: TransitionTypeReturn
+    package let loop: Bool
+
+    package init(current: Slideshow, duration: SlideDurationReturn, transition: TransitionTypeReturn, loop: Bool) {
+        self.current = current
+        self.duration = duration
+        self.transition = transition
+        self.loop = loop
     }
 }
 

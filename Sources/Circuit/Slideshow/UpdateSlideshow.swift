@@ -6,7 +6,7 @@ package func updateSlideshow(_ kernel: Kernel, _ payload: UpdateSlideshowPayload
     try await kernel.run(
         pipeline(Infrastructure.Library.fetch)                          // UUID -> Slideshow?
             .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
-                guard let existing else { return .fail(DomainError.slideshowNotFound(payload.id)) }
+                guard let existing else { return .fail(NotFoundError.slideshow(payload.id)) }
                 return .next(existing)
             }
             .pipe(Compute.Slideshow.update) { existing in               // transform with the requested change
