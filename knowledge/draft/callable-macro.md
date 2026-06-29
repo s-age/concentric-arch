@@ -39,10 +39,28 @@ with `static let <method> = Symbol<Payload, Output>("P.<method>")` per method an
   external argument labels**. Label handling matters: it reads `param.firstName` —
   `_ p:` → `device.m($0)`, `id:` → `device.m(id: $0)`. Compute's methods all use `_`,
   which masked this until Infrastructure's `fetch(id:)` / `delete(id:)` surfaced it.
-- It does **not** yet handle kernel-taking (composing) handlers — Circuit's
-  orchestration funcs take `Kernel` (`(Kernel, P) -> O`), so they need a macro
-  composing-variant (detect a leading `Kernel` param → emit the composing
-  `register`) or stay hand-wired.
+- It handles **composing** handlers too: a method whose first parameter is `Kernel`
+  binds via the composing `register` overload `(Kernel, P) -> O` (kernel handed in
+  at call time). Circuit's orchestration ops use this. Composing is a general kernel
+  capability (KernelTests use it as well) — it was never Circuit-specific.
+
+## "Is Circuit special?" — investigated, answer: no
+
+The composing `Kernel` parameter is **not a type** — a Circuit op is `Symbol<P, Void>`,
+kernel-free. The kernel is a **dependency**, and composing is its **call-time
+injection**. Why call-time, not init-time like Infrastructure's store? The store is an
+*input* to wiring (exists before), so it injects at init; the kernel is the *output*
+of wiring (`build()`), so it doesn't exist when devices are constructed — call-time is
+the only moment it exists. (Init-injecting it would need a mutable post-build
+`var kernel!` or an ambient task-local — both dirtier than the explicit param; the
+design comment in Kernel.swift documents this choice.)
+
+A "Layer 2" idea — make Circuit leaf by returning `.divert(Diversion(pipe, payload))`
+— was **rejected**: `.divert` is a *mid-pipeline* terminator ("abandon the rest, jump
+to another pipe"); using it as "a handler IS a pipeline" is off-purpose. It is also
+currently dormant in production (only `ComposeTests` constructs one, via `compose`;
+the `interpret`/`call` divert branch is untested). Finding a use for an unused feature
+by bending it is backwards. Composing stays — it is the correct, designed DI.
 
 See memory `kernel-reification-and-callable.md` for the design rationale (the
 "wiring-totality trilemma": compiler-totality / control-as-data mesh / no-macro —
