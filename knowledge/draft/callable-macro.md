@@ -35,9 +35,14 @@ with `static let <method> = Symbol<Payload, Output>("P.<method>")` per method an
   `swift build --target Contract -Xswiftc -Xfrontend -Xswiftc -dump-macro-expansions`
   (a bare `swiftc -typecheck` on one file fails — it lacks `-package-name`, the
   Kernel module, and Contract's deps).
-- The macro handles **0/1 payload parameter + async/throws + Void return**. It does
-  **not** yet handle kernel-taking (composing) handlers — Circuit's orchestration
-  funcs take `Kernel`, so they need either a macro variant or stay hand-wired.
+- The macro handles **0/1 payload parameter + async/throws + Void/optional return +
+  external argument labels**. Label handling matters: it reads `param.firstName` —
+  `_ p:` → `device.m($0)`, `id:` → `device.m(id: $0)`. Compute's methods all use `_`,
+  which masked this until Infrastructure's `fetch(id:)` / `delete(id:)` surfaced it.
+- It does **not** yet handle kernel-taking (composing) handlers — Circuit's
+  orchestration funcs take `Kernel` (`(Kernel, P) -> O`), so they need a macro
+  composing-variant (detect a leading `Kernel` param → emit the composing
+  `register`) or stay hand-wired.
 
 See memory `kernel-reification-and-callable.md` for the design rationale (the
 "wiring-totality trilemma": compiler-totality / control-as-data mesh / no-macro —

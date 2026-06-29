@@ -40,34 +40,38 @@ public struct CallableMacro: PeerMacro {
         for member in proto.memberBlock.members {
             guard let fn = member.decl.as(FunctionDeclSyntax.self) else { continue }
             let name = fn.name.text
-            let params = fn.signature.parameterClause.parameters
+            let allParams = Array(fn.signature.parameterClause.parameters)
 
-            let payloadType: String
-            let callArgs: String
-            let closureHead: String
-            switch params.count {
-            case 0:
-                payloadType = "Void"
-                callArgs = ""
-                closureHead = "{ _ in "
-            case 1:
-                let param = params.first!
-                payloadType = param.type.trimmedDescription
-                // Respect the external argument label: `_ p:` → `device.m($0)`,
-                // `id:` → `device.m(id: $0)`.
-                let label = param.firstName.text
-                callArgs = (label == "_") ? "$0" : "\(label): $0"
-                closureHead = "{ "
-            default:
-                throw CallableMacroError("@callable: '\(name)' must take zero or one payload parameter")
+            // A leading `Kernel` parameter marks a *composing* handler — one that
+            // routes back into the mesh. It binds via the composing `register`
+            // overload `(Kernel, P) -> O`; the kernel is handed in at call time
+            // (it doesn't exist at wire time). Everything after it is the payload.
+            let isComposing = allParams.first?.type.trimmedDescription == "Kernel"
+            let payloadParams = isComposing ? Array(allParams.dropFirst()) : allParams
+            guard payloadParams.count <= 1 else {
+                throw CallableMacroError("@callable: '\(name)' must take at most one payload parameter\(isComposing ? " (besides the leading Kernel)" : "")")
             }
 
+            let payloadType = payloadParams.first?.type.trimmedDescription ?? "Void"
             let output = fn.signature.returnClause?.type.trimmedDescription ?? "Void"
             let effects = fn.signature.effectSpecifiers
             let effectPrefix = (effects?.throwsClause != nil ? "try " : "") + (effects?.asyncSpecifier != nil ? "await " : "")
 
+            // Closure params: `kernel` (composing only) then `payload` or `_`.
+            var closureParams: [String] = []
+            if isComposing { closureParams.append("kernel") }
+            closureParams.append(payloadParams.isEmpty ? "_" : "payload")
+
+            // Call arguments to `device.<name>(…)`, honouring the payload label.
+            var callArgs: [String] = []
+            if isComposing { callArgs.append("kernel") }
+            if let p = payloadParams.first {
+                let label = p.firstName.text
+                callArgs.append(label == "_" ? "payload" : "\(label): payload")
+            }
+
             symbolLines.append(#"    package static let \#(name) = Symbol<\#(payloadType), \#(output)>("\#(prefix).\#(name)")"#)
-            wireLines.append("        builder.register(\(name)) \(closureHead)\(effectPrefix)device.\(name)(\(callArgs)) }")
+            wireLines.append("        builder.register(\(name)) { \(closureParams.joined(separator: ", ")) in \(effectPrefix)device.\(name)(\(callArgs.joined(separator: ", "))) }")
         }
 
         let enumName = "\(protoName)Callable"

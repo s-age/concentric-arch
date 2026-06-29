@@ -1,21 +1,20 @@
-import Foundation
 import Kernel
 import Contract
 import Circuit
 
-/// The *driver* for the `Circuit.Config` port.
-///
-/// Each symbol maps to one orchestration pipeline (a `package` function in the
-/// `Circuit` module), invoked with the kernel handed in at call time.
+/// The *driver* for the `Circuit.Config` port — binds the orchestration device
+/// (`any ConfigCircuiting`) via the `@callable`-generated `wire`.
 ///
 /// Layer-prefixed (`Circuit…`) to avoid colliding with the Infrastructure config
 /// driver, since the `Config` port name is shared across both layers.
 package struct CircuitConfigDriver {
-    package init() {}
+    private let circuit: any ConfigCircuiting
+
+    package init(circuit: any ConfigCircuiting = ConfigCircuit()) {
+        self.circuit = circuit
+    }
 
     package func wire(into builder: KernelBuilder) {
-        builder.register(Contract.Circuit.Config.save) { kernel, payload in
-            try await saveConfig(kernel, payload)
-        }
+        ConfigCircuitingCallable.wire(circuit, into: builder)
     }
 }

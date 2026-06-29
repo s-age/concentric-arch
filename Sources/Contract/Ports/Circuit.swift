@@ -5,19 +5,24 @@ import Kernel
 ///
 /// Circuit is "just a circuit": it routes between other devices via the kernel
 /// (`Compute.*` for logic, `Infrastructure.*` for I/O) and enforces flow rules,
-/// but holds no business logic itself. Handlers live in `Driver/Circuit/`.
-package enum Circuit {
-    package enum Slideshow {
-        // Forward-only commands: no return path. They publish into the
-        // buffer (`LibraryState`) and Presentation observes it — see `kernel.run`.
-        package static let create       = Symbol<CreateSlideshowPayload, Void>("Circuit.Slideshow.create")
-        package static let update       = Symbol<UpdateSlideshowPayload, Void>("Circuit.Slideshow.update")
-        package static let updateConfig = Symbol<UpdateSlideshowConfigPayload, Void>("Circuit.Slideshow.updateConfig")
-        package static let fetchAll     = Symbol<FetchSlideshowsPayload, Void>("Circuit.Slideshow.fetchAll")
-        package static let delete       = Symbol<DeleteSlideshowPayload, Void>("Circuit.Slideshow.delete")
-    }
+/// but holds no business logic itself. Its operations are *composing* — they take
+/// the `Kernel` so they can route back into the mesh — which `@callable` binds via
+/// the composing `register` overload. The conforming types live in the `Circuit`
+/// module and delegate to the saga functions there.
 
-    package enum Config {
-        package static let save = Symbol<SaveConfigPayload, Void>("Circuit.Config.save")
-    }
+/// The slideshow orchestration surface. Forward-only commands (Void): they publish
+/// into `LibraryState` and Presentation observes it.
+@callable("Circuit.Slideshow")
+package protocol SlideshowCircuiting: Sendable {
+    func create(_ kernel: Kernel, _ payload: CreateSlideshowPayload) async throws
+    func update(_ kernel: Kernel, _ payload: UpdateSlideshowPayload) async throws
+    func updateConfig(_ kernel: Kernel, _ payload: UpdateSlideshowConfigPayload) async throws
+    func fetchAll(_ kernel: Kernel, _ payload: FetchSlideshowsPayload) async throws
+    func delete(_ kernel: Kernel, _ payload: DeleteSlideshowPayload) async throws
+}
+
+/// The config orchestration surface.
+@callable("Circuit.Config")
+package protocol ConfigCircuiting: Sendable {
+    func save(_ kernel: Kernel, _ payload: SaveConfigPayload) async throws
 }
