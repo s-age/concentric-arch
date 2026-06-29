@@ -6,8 +6,8 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         // The `concentric-arch` executable bundles every layer
-        // (Presentation/UseCase/Domain/Repository/Infrastructure) plus the
-        // SwiftUI @main shell in App/. The build script (Scripts/build.sh) copies the
+        // (Kernel/Contract/Infrastructure/Compute/Circuit/Driver/Presentation) plus
+        // the SwiftUI @main shell in App/. The build script (Scripts/build.sh) copies the
         // resulting `.build/release/concentric-arch` binary into concentric-arch.app.
         .executable(name: "concentric-arch", targets: ["concentric-arch"]),
     ],
@@ -18,7 +18,7 @@ let package = Package(
         .target(name: "Contract", dependencies: ["Kernel"], path: "Sources/Contract"),
         // Infrastructure: storage device — repositories / stores / SwiftData @Model adapters.
         .target(name: "Infrastructure", dependencies: ["Contract"], path: "Sources/Infrastructure"),
-        // Compute: computational device — pure domain logic (no I/O, no kernel calls).
+        // Compute: computational device — pure business logic (no I/O, no kernel calls).
         .target(name: "Compute", dependencies: ["Contract"], path: "Sources/Compute"),
         // Circuit: orchestration device — routes between devices via the kernel (rules, no logic).
         .target(name: "Circuit", dependencies: ["Kernel", "Contract"], path: "Sources/Circuit"),

@@ -17,7 +17,7 @@ package enum TraceVerb: String, Sendable {
 }
 
 /// One recorded symbol invocation: which node fired, how it resolved, and where
-/// it sits in the call tree. The kernel-level counterpart of the buffer's domain
+/// it sits in the call tree. The kernel-level counterpart of the buffer's app
 /// state — a bounded log the monitor reads (DEBUG only). `id` is a monotonic
 /// sequence assigned on record (record order); `span`/`parent` are the tree
 /// identity, independent of `id`. `parent == nil` marks a flow root.

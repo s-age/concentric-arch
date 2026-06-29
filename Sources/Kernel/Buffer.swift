@@ -118,7 +118,7 @@ package final class Buffer {
     // MARK: - Snapshot / restore (time-travel)
 
     /// Erased copy of the named cells' current values. The caller picks which
-    /// stores (domain state only — never `TraceState`/history, which must survive
+    /// stores (app state only — never `TraceState`/history, which must survive
     /// a rewind). Returns one entry per key whose store exists.
     package func capture(_ keys: Set<ObjectIdentifier>) -> BufferImage {
         var image: BufferImage = [:]

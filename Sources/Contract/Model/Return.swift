@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Returns
 //
 // The output side of the Circuit ports — what `kernel.call(Circuit.…)` returns.
-// These are view-facing projections of the domain entities in `Domain/`.
+// These are immutable, view-facing projections of the entities in `Entities.swift`.
 
 package enum SlideDurationReturn: String, Equatable, Sendable, CaseIterable {
     case five = "5"
@@ -68,7 +68,7 @@ package struct SlideshowReturn: Identifiable, Equatable, Sendable {
     package let createdAt: Date
 }
 
-// MARK: - Mapping from domain entities
+// MARK: - Mapping to/from entities
 
 extension SlideshowReturn {
     package init(from entity: Slideshow) {
@@ -103,10 +103,10 @@ extension SlideshowConfigReturn {
         )
     }
 
-    package var toDomain: SlideshowConfig {
+    package var toEntity: SlideshowConfig {
         SlideshowConfig(
-            duration: duration.toDomain,
-            transition: transition.toDomain,
+            duration: duration.toEntity,
+            transition: transition.toEntity,
             loop: loop
         )
     }
@@ -124,7 +124,7 @@ extension SlideDurationReturn {
         }
     }
 
-    package var toDomain: SlideDuration {
+    package var toEntity: SlideDuration {
         switch self {
         case .five: .five
         case .ten: .ten
@@ -146,7 +146,7 @@ extension TransitionTypeReturn {
         }
     }
 
-    package var toDomain: TransitionType {
+    package var toEntity: TransitionType {
         switch self {
         case .none: .none
         case .fade: .fade

@@ -100,7 +100,7 @@ package final class Kernel: Sendable {
     /// `nil` when capture was toggled off.
     private let traceSink: @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void
     /// Where a flow root's resulting buffer state is captured (DEBUG only) —
-    /// wired by App to render the domain stores into the buffer's
+    /// wired by App to render the app-state stores into the buffer's
     /// `BufferHistoryState`. Fires once per flow root (`parent == nil`), after the
     /// command has settled, tagged with the root `span` so the monitor joins each
     /// snapshot to the trace forest. No-op by default — release pays nothing.
@@ -117,12 +117,12 @@ package final class Kernel: Sendable {
     @TaskLocal static var span: UUID?
 
     /// Single runtime toggle for the monitor's two captures: each invoke's input
-    /// payload (per invoke) and the buffer's domain state at each command boundary
+    /// payload (per invoke) and the buffer's app state at each command boundary
     /// (per flow root, the state side of time-travel). One switch because the
     /// monitor inspects them together — there is no reason to want one without the
     /// other. Off by default, so the common path pays only a bool load; turning it
     /// on opts into a synchronous `String(describing:)` per invoke plus one per
-    /// domain store per flow root. A process-global flag read on the hot path —
+    /// app-state store per flow root. A process-global flag read on the hot path —
     /// deliberately *not* in the `@MainActor` buffer, which would hop every invoke
     /// onto the main actor and serialize them. The monitor's toggle binds straight
     /// to it. The race on a lone debug bool is benign (a flip may catch one

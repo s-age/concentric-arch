@@ -226,7 +226,7 @@ struct KernelMonitorView: View {
         }
     }
 
-    // Buffer tab: the domain state as of the selected row's command boundary —
+    // Buffer tab: the app state as of the selected row's command boundary —
     // the snapshot tagged with the row's flow root. This is the viewing side of
     // time-travel: scrub the trace table and the world here rewinds with it.
     private var bufferDetail: some View {

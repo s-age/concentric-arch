@@ -6,7 +6,7 @@ package func updateSlideshowConfig(_ kernel: Kernel, _ payload: UpdateSlideshowC
     try await kernel.run(
         pipeline(Infrastructure.Library.fetch)                          // UUID -> Slideshow?
             .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
-                guard let existing else { return .fail(DomainError.slideshowNotFound(payload.slideshowID)) }
+                guard let existing else { return .fail(NotFoundError.slideshow(payload.slideshowID)) }
                 return .next(existing)
             }
             .pipe(Compute.Slideshow.applyConfig) { existing in          // transform with the requested config

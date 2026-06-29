@@ -19,7 +19,7 @@ package struct StoreDump: Sendable, Identifiable {
     }
 }
 
-/// The state side of time-travel: the buffer's domain stores rendered to text at
+/// The state side of time-travel: the buffer's app-state stores rendered to text at
 /// one command boundary. Tagged with `root` — the flow-root span of the command
 /// that produced it — so the monitor can join a snapshot to the trace forest:
 /// selecting any trace row finds its flow root, and the snapshot for that root is

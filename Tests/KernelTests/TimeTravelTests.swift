@@ -5,7 +5,7 @@ import Testing
 
 // MARK: - Time-travel preview (DEBUG: enter/exit round-trip)
 
-/// A throwaway domain state — any value type works as a buffer cell.
+/// A throwaway app state — any value type works as a buffer cell.
 private struct Counter { var n: Int }
 
 @MainActor

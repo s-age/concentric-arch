@@ -25,7 +25,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 #if DEBUG
 /// Multi-line, indented reflection of a value for the monitor's Buffer tab.
 /// `dump` walks the value with `Mirror`, so it needs no `Codable`/`CustomString`
-/// conformance — it pretty-prints any domain state as-is, which is why the
+/// conformance — it pretty-prints any app state as-is, which is why the
 /// snapshot sink keeps strings (rendered here) rather than typed values.
 private func prettyDump(_ value: Any) -> String {
     var text = ""
@@ -79,7 +79,7 @@ struct ConcentricArchApp: App {
             // Infrastructure ports (leaf handlers → repositories/stores).
             LibraryDriver(repository: makeSlideshowStore(modelContainer)).wire(into: builder)
             InfrastructureConfigDriver(store: makeConfigStore(modelContainer)).wire(into: builder)
-            // Compute device (leaf handlers → pure domain logic).
+            // Compute device (leaf handlers → pure business logic).
             SlideshowComputeDriver().wire(into: builder)
             ImageComputeDriver().wire(into: builder)
             // Circuit device (composing handlers → orchestration that routes via the kernel).
@@ -101,14 +101,14 @@ struct ConcentricArchApp: App {
                     #endif
                 },
                 // State side of time-travel: at each command boundary (flow root)
-                // render the domain stores to text and append to the snapshot ring.
+                // render the app-state stores to text and append to the snapshot ring.
                 // App owns the store list — the kernel stays state-agnostic, exactly
                 // as it does for the error and trace sinks. `TraceState`/
                 // `BufferHistoryState` are deliberately excluded (the trace and the
                 // history are not part of the world we rewind).
                 onSnapshot: { root, at in
                     #if DEBUG
-                    // One main-actor hop: read the domain stores, render them for
+                    // One main-actor hop: read the app-state stores, render them for
                     // display *and* keep an erased typed copy for live-restore. Both
                     // are built here so the non-Sendable `image` never leaves the
                     // main actor. `TraceState`/`BufferHistoryState`/`TimeTravelState`
