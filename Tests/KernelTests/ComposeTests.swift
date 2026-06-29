@@ -325,7 +325,7 @@ func forestSurfacesAnEntryWithAnAbsentParentAsItsOwnRoot() {
     #expect(forest[0].root == child) // its own span is the visible flow root
 }
 
-// MARK: - payload capture (DEBUG: opt-in via Kernel.recordsPayload)
+// MARK: - payload capture (DEBUG: opt-in via Kernel.recordsInspection)
 
 /// Collects the rendered payload the trace sink emits per invoke.
 private actor PayloadCollector {
@@ -356,11 +356,11 @@ func invokeCapturesInputPayloadOnlyWhileTheToggleIsOn() async throws {
         )
     }
 
-    Kernel.recordsPayload = false
+    Kernel.recordsInspection = false
     _ = try await kernel.call(increment, 41)   // off → not rendered
 
-    Kernel.recordsPayload = true
-    defer { Kernel.recordsPayload = false }
+    Kernel.recordsInspection = true
+    defer { Kernel.recordsInspection = false }
     _ = try await kernel.call(increment, 99)   // on → rendered
 
     let records = await collector.records
