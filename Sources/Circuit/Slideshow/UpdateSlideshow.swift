@@ -9,7 +9,7 @@ package func updateSlideshow(_ kernel: Kernel, _ payload: UpdateSlideshowPayload
                 guard let existing else { return .fail(NotFoundError.slideshow(payload.id)) }
                 return .next(existing)
             }
-            .pipe(Compute.Slideshow.update) { existing in               // transform with the requested change
+            .pipe(SlideshowComputingCallable.update) { existing in      // transform with the requested change
                 UpdateSlideshowComputePayload(
                     current: existing,
                     name: payload.name,

@@ -8,6 +8,20 @@ enum KernelError: Error {
     case composeTypeMismatch(expected: String, actual: String)
 }
 
+// MARK: - Callable
+
+/// The erased dispatch cell: what `Driver.register` mints when it fuses a
+/// `Symbol`'s phantom types with a concrete handler, and what the kernel's
+/// `handlers` table stores per symbol id.
+///
+/// Deliberately *not* typed in `Payload`/`Output` — those vary per symbol, so a
+/// single homogeneous table can only hold the erased form (`Any` in, `Verb<Any>`
+/// out). Type safety is *not* claimed here; it lives on the `Symbol` that pins
+/// both ends, re-applied at the typed `call`/`register` boundary. The name states
+/// the role — "a thing you can call" — not a guarantee: `invoke` is the (erased)
+/// act of calling one, `call<P,O>` is the typed wrapper around an `invoke`.
+package typealias Callable = @Sendable (Kernel, Any) async throws -> Verb<Any>
+
 // MARK: - Builder
 
 /// Collects the symbol → handler bindings during app wiring. Drivers register
@@ -18,9 +32,15 @@ enum KernelError: Error {
 /// (immutable, concurrent) is what lets `Kernel` be a plain `Sendable` value
 /// with no locks: registration is finished before the first call can happen.
 package final class KernelBuilder {
-    fileprivate var handlers: [String: @Sendable (Kernel, Any) async throws -> Verb<Any>] = [:]
+    fileprivate var handlers: [String: Callable] = [:]
 
     package init() {}
+
+    /// The set of symbol ids currently bound. Read after wiring (before `build`)
+    /// by the wiring-exhaustiveness smoke test, which asserts it covers every
+    /// declared `Symbol` id — turning a forgotten `register`/`wire` from a runtime
+    /// `KernelError.unbound` on a cold path into a CI failure.
+    package var boundSymbolIDs: Set<String> { Set(handlers.keys) }
 
     /// Bind a *leaf* handler — one that fulfils the symbol on its own and makes
     /// no further kernel calls (e.g. an Infrastructure port hitting a repository).
@@ -82,7 +102,7 @@ package final class KernelBuilder {
 /// `kernel.call(Infrastructure.Library.fetch, id)`. Type safety is preserved
 /// end to end because `call` is generic over the symbol's `Payload`/`Output`.
 package final class Kernel: Sendable {
-    private let handlers: [String: @Sendable (Kernel, Any) async throws -> Verb<Any>]
+    private let handlers: [String: Callable]
 
     /// The typed, observable state region. `Buffer` is `@MainActor` (hence
     /// implicitly `Sendable`), so a plain `Sendable` `Kernel` can hold it as a
@@ -150,7 +170,7 @@ package final class Kernel: Sendable {
     #endif
 
     fileprivate init(
-        handlers: [String: @Sendable (Kernel, Any) async throws -> Verb<Any>],
+        handlers: [String: Callable],
         buffer: Buffer,
         errorSink: @escaping @Sendable (any Error) async -> Void,
         traceSink: @escaping @Sendable (String, TraceVerb, UUID, UUID?, String?, Date) async -> Void,

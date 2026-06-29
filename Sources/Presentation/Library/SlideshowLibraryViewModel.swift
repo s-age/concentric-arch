@@ -63,7 +63,7 @@ package final class SlideshowLibraryViewModel {
         guard let slideshow = selectedSlideshow else { return }
         let existing = slideshow.slides.map(\.localIdentifier)
         let added = (try? await kernel.call(
-            Compute.Image.addDroppedFiles,
+            ImageComputingCallable.addDroppedFiles,
             AddDroppedFilesPayload(urls: urls, existingIdentifiers: existing)
         )) ?? []
         guard !added.isEmpty else { return }

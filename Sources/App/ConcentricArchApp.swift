@@ -76,15 +76,13 @@ struct ConcentricArchApp: App {
             // `kernel.call(Infrastructure.Library.<method>, payload)` dispatches
             // through LibraryDriver to the repository.
             let builder = KernelBuilder()
-            // Infrastructure ports (leaf handlers → repositories/stores).
-            LibraryDriver(repository: makeSlideshowStore(modelContainer)).wire(into: builder)
-            InfrastructureConfigDriver(store: makeConfigStore(modelContainer)).wire(into: builder)
-            // Compute device (leaf handlers → pure business logic).
-            SlideshowComputeDriver().wire(into: builder)
-            ImageComputeDriver().wire(into: builder)
-            // Circuit device (composing handlers → orchestration that routes via the kernel).
-            SlideshowDriver().wire(into: builder)
-            CircuitConfigDriver().wire(into: builder)
+            // One shared wiring list (in Driver), used here and by the wiring
+            // smoke test — so a forgotten driver can't slip through App-side only.
+            wireAllDrivers(
+                into: builder,
+                library: makeSlideshowStore(modelContainer),
+                config: makeConfigStore(modelContainer)
+            )
             // The kernel routes a dispatched command's failure here; App owns the
             // concrete error-state type, so it writes the buffer on the kernel's behalf.
             let buffer = bufferBuilder.build()

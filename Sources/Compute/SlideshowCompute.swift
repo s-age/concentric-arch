@@ -3,7 +3,7 @@ import Contract
 
 /// Pure business logic for building and transforming slideshows. No I/O, no kernel
 /// calls — a leaf computation. Wired into the kernel by `SlideshowComputeDriver`.
-package struct SlideshowCompute {
+package struct SlideshowCompute: SlideshowComputing {
     package init() {}
 
     package func create(_ payload: CreateSlideshowPayload) -> Slideshow {

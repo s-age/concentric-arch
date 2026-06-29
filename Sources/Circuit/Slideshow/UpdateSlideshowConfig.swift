@@ -9,7 +9,7 @@ package func updateSlideshowConfig(_ kernel: Kernel, _ payload: UpdateSlideshowC
                 guard let existing else { return .fail(NotFoundError.slideshow(payload.slideshowID)) }
                 return .next(existing)
             }
-            .pipe(Compute.Slideshow.applyConfig) { existing in          // transform with the requested config
+            .pipe(SlideshowComputingCallable.applyConfig) { existing in // transform with the requested config
                 ApplyConfigComputePayload(
                     current: existing,
                     duration: payload.duration,

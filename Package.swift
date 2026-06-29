@@ -1,5 +1,6 @@
 // swift-tools-version: 6.0
 import PackageDescription
+import CompilerPluginSupport
 
 let package = Package(
     name: "ConcentricArch",
@@ -11,11 +12,26 @@ let package = Package(
         // resulting `.build/release/concentric-arch` binary into concentric-arch.app.
         .executable(name: "concentric-arch", targets: ["concentric-arch"]),
     ],
+    dependencies: [
+        // swift-syntax backs the `@callable` macro plugin (compile-time wiring generation).
+        .package(url: "https://github.com/swiftlang/swift-syntax.git", "600.0.0"..<"700.0.0"),
+    ],
     targets: [
+        // CallableMacrosPlugin: compiler plugin implementing `@callable` — generates
+        // typed Symbols + wiring from a device protocol's method requirements.
+        .macro(
+            name: "CallableMacrosPlugin",
+            dependencies: [
+                .product(name: "SwiftSyntaxMacros", package: "swift-syntax"),
+                .product(name: "SwiftCompilerPlugin", package: "swift-syntax"),
+            ],
+            path: "Sources/CallableMacrosPlugin"
+        ),
         // Kernel: the dispatch primitives (`Symbol`, `Kernel`, `KernelBuilder`). Leaf.
         .target(name: "Kernel", path: "Sources/Kernel"),
         // Contract: ports (Symbol declarations) + model (entities/DTOs) + errors.
-        .target(name: "Contract", dependencies: ["Kernel"], path: "Sources/Contract"),
+        // Depends on the macro plugin: `@callable` is declared and used here.
+        .target(name: "Contract", dependencies: ["Kernel", "CallableMacrosPlugin"], path: "Sources/Contract"),
         // Infrastructure: storage device — repositories / stores / SwiftData @Model adapters.
         .target(name: "Infrastructure", dependencies: ["Contract"], path: "Sources/Infrastructure"),
         // Compute: computational device — pure business logic (no I/O, no kernel calls).

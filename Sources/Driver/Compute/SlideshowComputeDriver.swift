@@ -10,17 +10,19 @@ import Compute
 /// both the `Contract` module (the port enum) and the `Compute` module (the
 /// logic) — same bare name.
 package struct SlideshowComputeDriver {
-    package init() {}
+    /// Held as the existential so only the `SlideshowComputing` surface is
+    /// reachable here — the concrete `SlideshowCompute` and its privates can't
+    /// leak into the wiring (reverse exactness). Defaulted because the compute
+    /// device is pure (one impl, nothing to swap); injectable for tests.
+    private let device: any SlideshowComputing
+
+    package init(device: any SlideshowComputing = SlideshowCompute()) {
+        self.device = device
+    }
 
     package func wire(into builder: KernelBuilder) {
-        builder.register(Contract.Compute.Slideshow.create) { payload in
-            SlideshowCompute().create(payload)
-        }
-        builder.register(Contract.Compute.Slideshow.update) { payload in
-            SlideshowCompute().update(payload)
-        }
-        builder.register(Contract.Compute.Slideshow.applyConfig) { payload in
-            SlideshowCompute().applyConfig(payload)
-        }
+        // The wiring is generated from `SlideshowComputing`'s requirements by
+        // `@callable` — one `register` per method, none can be forgotten.
+        SlideshowComputingCallable.wire(device, into: builder)
     }
 }
