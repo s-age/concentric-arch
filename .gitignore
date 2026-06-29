@@ -27,3 +27,6 @@ package-lock.json
 
 # Xcode project file contains developer-specific signing config (DEVELOPMENT_TEAM, BUNDLE_IDENTIFIER)
 10slide.xcodeproj/project.pbxproj
+
+# Local working notes (Claude Code knowledge drafts)
+knowledge/
