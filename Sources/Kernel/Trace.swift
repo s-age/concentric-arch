@@ -3,8 +3,13 @@ import Foundation
 // MARK: - Trace
 
 /// The verb a handler resolved to — the control decision, captured as data.
+///
+/// `coalesced` is not a handler verb: it marks a `dispatch` that was dropped on
+/// the bus because an identical command was already queued or running. It has no
+/// child invokes (the command never ran), so it surfaces as its own root row —
+/// the redundant work made visible rather than silently swallowed.
 package enum TraceVerb: String, Sendable {
-    case next, abort, divert, fail
+    case next, abort, divert, fail, coalesced
 
     init(_ verb: Verb<Any>) {
         switch verb {

@@ -17,15 +17,12 @@ package final class SlideshowLibraryViewModel {
     /// selection, so it stays here rather than in the buffer.
     var selectedID: UUID?
 
-    /// The id we last asked `open` to load while the slot was still empty — used to
-    /// dedupe rapid `.task(id:)` re-fires (e.g. the `List` selection thrashing when
-    /// a freshly-created row is selected before it exists in the catalog).
-    private var pendingOpenID: UUID?
-
-    /// Whether a `close` is already in flight — dedupes the same `.task(id:)` re-fire
-    /// on the deselect side (clicking outside the list can run `openSelected(nil)`
-    /// more than once before the slot is cleared).
-    private var pendingClose = false
+    /// A slideshow this view model just created: the `create` pipeline already wrote
+    /// it into `SlideshowState`, so the selection-driven `openSelected()` must not
+    /// re-fetch it. Cleared the first time `openSelected()` sees it. (One synchronous
+    /// flag — `create` and `open` are different commands, so the kernel's per-command
+    /// coalescing can't relate them.)
+    private var justCreatedID: UUID?
 
     private let kernel: Kernel
 
@@ -43,53 +40,22 @@ package final class SlideshowLibraryViewModel {
         return open?.id == selectedID ? open : nil
     }
 
-    /// The raw id currently in the open slot, regardless of selection — observed by
-    /// the editor to drive `slotDidSettle()` when the slot loads or clears (the
-    /// selection-guarded `selectedSlideshow` can't see the slot clearing on close).
-    var openSlideshowID: UUID? { kernel.buffer.read(SlideshowState.self).slideshow?.id }
-
-    /// Bring `SlideshowState` in line with the current selection. Driven by the
-    /// editor's `.task(id: selectedID)`, so it fires on selection change and when
-    /// the home view re-appears (e.g. returning from the player, which may have
-    /// left a different slideshow in the slot).
+    /// Load the selected slideshow's detail into `SlideshowState`, unless the slot
+    /// already holds it. Driven by the editor's `.task(id: selectedID)`. No manual
+    /// dedupe: the slot check skips the no-op (already open, e.g. just created or
+    /// returned from the player onto the same one), and the kernel coalesces any
+    /// duplicate `open` that a selection flicker / double-click still emits.
+    ///
+    /// Deselect (nil) intentionally does nothing — the slot keeps the last opened
+    /// slideshow (at most one resident), and not firing `close` here avoids the
+    /// open/close churn a transient selection nil would cause.
     func openSelected() async {
-        let current = kernel.buffer.read(SlideshowState.self).slideshow
-        guard let selectedID else {
-            // Genuine deselect — free the slot once. Skip while an open is in flight
-            // (a double-click momentarily clears then re-sets selection; we mustn't
-            // wipe the slideshow we're loading), and skip if a close is already in
-            // flight (dedupes the repeat `openSelected(nil)` before the slot clears).
-            if pendingOpenID == nil, !pendingClose, current != nil {
-                pendingClose = true
-                kernel.dispatch(Callable.Circuit.Slideshow.close, CloseSlideshowPayload())
-            }
-            return
-        }
-        pendingClose = false
-        // Already the open slideshow (the player/create just loaded it) — nothing to do.
-        if current?.id == selectedID {
-            pendingOpenID = nil
-            return
-        }
-        // An open for this id is already in flight: dedupe the repeat request. The
-        // marker is cleared by `slotDidSettle()` once the slot reflects the load, so
-        // this only matches a dispatch that hasn't landed yet — covering both the
-        // double-click flicker and a just-created row whose List selection thrashes.
-        // A genuine change (a different id, e.g. the player left another in the slot)
-        // has `pendingOpenID != selectedID`, so it still re-opens.
-        if pendingOpenID == selectedID { return }
-        pendingOpenID = selectedID
+        guard let selectedID else { return }
+        // Just created: `create` already populated the slot — skip the redundant open
+        // (and consume the flag so a later re-select opens normally).
+        if justCreatedID == selectedID { justCreatedID = nil; return }
+        guard kernel.buffer.read(SlideshowState.self).slideshow?.id != selectedID else { return }
         kernel.dispatch(Callable.Circuit.Slideshow.open, OpenSlideshowPayload(id: selectedID))
-    }
-
-    /// Clear the in-flight marker once the open slot reflects what we asked to open.
-    /// Driven by the editor observing `SlideshowState`, so a later selection that
-    /// needs a real re-open (returning from the player, which loaded a different
-    /// slideshow) isn't wrongly deduped.
-    func slotDidSettle() {
-        let id = kernel.buffer.read(SlideshowState.self).slideshow?.id
-        if id == pendingOpenID { pendingOpenID = nil }
-        if id == nil { pendingClose = false }   // the close landed
     }
 
     func loadLibrary() async {
@@ -105,11 +71,9 @@ package final class SlideshowLibraryViewModel {
         // no return value to consume, no buffer channel. The pipeline appends the
         // new slideshow to the buffer; the list refreshes via observation.
         let id = UUID()
-        // The create pipeline writes the new slideshow straight into `SlideshowState`,
-        // so the editor needs no separate `open`. Pre-seed `pendingOpenID` so the
-        // selection-driven `.task(id:)` skips its (redundant) fetch while create is
-        // still in flight and the catalog row doesn't yet exist.
-        pendingOpenID = id
+        // The create pipeline writes the new slideshow straight into `SlideshowState`;
+        // flag it so the selection-driven `openSelected()` doesn't re-fetch it.
+        justCreatedID = id
         kernel.dispatch(
             Callable.Circuit.Slideshow.create,
             CreateSlideshowPayload(
@@ -162,10 +126,7 @@ package final class SlideshowLibraryViewModel {
     func delete(id: UUID) async {
         // The pipeline removes it from the buffer; we only manage local selection.
         kernel.dispatch(Callable.Circuit.Slideshow.delete, DeleteSlideshowPayload(id: id))
-        if selectedID == id {
-            selectedID = nil
-            pendingOpenID = nil
-        }
+        if selectedID == id { selectedID = nil }
     }
 
     // MARK: - Private
