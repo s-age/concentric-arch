@@ -8,7 +8,7 @@ enum KernelError: Error {
     case composeTypeMismatch(expected: String, actual: String)
 }
 
-// MARK: - Callable
+// MARK: - ErasedHandler
 
 /// The erased dispatch cell: what `Driver.register` mints when it fuses a
 /// `Symbol`'s phantom types with a concrete handler, and what the kernel's
@@ -18,9 +18,13 @@ enum KernelError: Error {
 /// single homogeneous table can only hold the erased form (`Any` in, `Verb<Any>`
 /// out). Type safety is *not* claimed here; it lives on the `Symbol` that pins
 /// both ends, re-applied at the typed `call`/`register` boundary. The name states
-/// the role — "a thing you can call" — not a guarantee: `invoke` is the (erased)
-/// act of calling one, `call<P,O>` is the typed wrapper around an `invoke`.
-package typealias Callable = @Sendable (Kernel, Any) async throws -> Verb<Any>
+/// the role — an *erased* handler — not a guarantee: `invoke` is the (erased) act
+/// of calling one, `call<P,O>` is the typed wrapper around an `invoke`.
+///
+/// (The typed, human-readable index of every callable endpoint is `Callable` in
+/// the `Contract` module — the dispatch-key namespace. This is the runtime cell
+/// those keys resolve to.)
+package typealias ErasedHandler = @Sendable (Kernel, Any) async throws -> Verb<Any>
 
 // MARK: - Builder
 
@@ -32,7 +36,7 @@ package typealias Callable = @Sendable (Kernel, Any) async throws -> Verb<Any>
 /// (immutable, concurrent) is what lets `Kernel` be a plain `Sendable` value
 /// with no locks: registration is finished before the first call can happen.
 package final class KernelBuilder {
-    fileprivate var handlers: [String: Callable] = [:]
+    fileprivate var handlers: [String: ErasedHandler] = [:]
 
     package init() {}
 
@@ -102,7 +106,7 @@ package final class KernelBuilder {
 /// `kernel.call(Infrastructure.Library.fetch, id)`. Type safety is preserved
 /// end to end because `call` is generic over the symbol's `Payload`/`Output`.
 package final class Kernel: Sendable {
-    private let handlers: [String: Callable]
+    private let handlers: [String: ErasedHandler]
 
     /// The typed, observable state region. `Buffer` is `@MainActor` (hence
     /// implicitly `Sendable`), so a plain `Sendable` `Kernel` can hold it as a
@@ -170,7 +174,7 @@ package final class Kernel: Sendable {
     #endif
 
     fileprivate init(
-        handlers: [String: Callable],
+        handlers: [String: ErasedHandler],
         buffer: Buffer,
         errorSink: @escaping @Sendable (any Error) async -> Void,
         traceSink: @escaping @Sendable (String, TraceVerb, UUID, UUID?, String?, Date) async -> Void,

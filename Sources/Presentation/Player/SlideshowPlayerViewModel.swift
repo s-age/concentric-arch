@@ -186,7 +186,7 @@ package final class SlideshowPlayerViewModel {
         // Fire-and-forget: the pipeline replaces the row in `LibraryState`, which
         // the `slideshow` accessor reads back via observation; failures surface in
         // the global banner.
-        kernel.dispatch(SlideshowCircuitingCallable.updateConfig, request)
+        kernel.dispatch(Callable.Circuit.Slideshow.updateConfig, request)
         if isPlaying { play() }
     }
 
@@ -198,7 +198,7 @@ package final class SlideshowPlayerViewModel {
             loop: slideshow.config.loop
         )
         // Fire-and-forget: see `updateDuration`.
-        kernel.dispatch(SlideshowCircuitingCallable.updateConfig, request)
+        kernel.dispatch(Callable.Circuit.Slideshow.updateConfig, request)
     }
 
     // MARK: - Filmstrip visibility

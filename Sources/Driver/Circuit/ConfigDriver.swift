@@ -15,6 +15,6 @@ package struct CircuitConfigDriver {
     }
 
     package func wire(into builder: KernelBuilder) {
-        ConfigCircuitingCallable.wire(circuit, into: builder)
+        Callable.Circuit.Config.wire(circuit, into: builder)
     }
 }

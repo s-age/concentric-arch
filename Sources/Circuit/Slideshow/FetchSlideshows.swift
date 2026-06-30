@@ -10,7 +10,7 @@ package func fetchSlideshows(_ kernel: Kernel, _ payload: FetchSlideshowsPayload
     await kernel.buffer.mutate(LibraryState.self) { $0.isLoading = true }
 
     try await kernel.run(
-        pipeline(SlideshowStoringCallable.fetchAll)             // Void -> [Slideshow]
+        pipeline(Callable.Infrastructure.Library.fetchAll)             // Void -> [Slideshow]
             .map { $0.map(SlideshowReturn.init(from:)) }         // -> [SlideshowReturn]
             .effect { kernel, returns in
                 // Authoritative full reload. This is the one writer NOT safe against

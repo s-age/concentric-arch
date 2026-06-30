@@ -14,6 +14,6 @@ package struct SlideshowDriver {
     }
 
     package func wire(into builder: KernelBuilder) {
-        SlideshowCircuitingCallable.wire(circuit, into: builder)
+        Callable.Circuit.Slideshow.wire(circuit, into: builder)
     }
 }
