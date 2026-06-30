@@ -7,7 +7,7 @@ import Contract
 /// without running. Captures `payload` (the requested config) in its closures.
 package func updateSlideshowConfigPipe(_ payload: UpdateSlideshowConfigPayload) -> Pipe<UUID, SlideshowReturn> {
     pipeline(Callable.Infrastructure.Slideshow.fetch)                        // UUID -> Slideshow?
-        .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
+        .pipe(note: "require it exists, else fail") { _, existing -> Verb<Slideshow> in
             guard let existing else { return .fail(NotFoundError.slideshow(payload.slideshowID)) }
             return .next(existing)
         }
@@ -20,8 +20,8 @@ package func updateSlideshowConfigPipe(_ payload: UpdateSlideshowConfigPayload) 
             )
         }
         .tap(Callable.Infrastructure.Slideshow.save)                         // persist, keep the Slideshow flowing
-        .map(SlideshowReturn.init(from:))                            // project -> SlideshowReturn
-        .effect { kernel, result in                                 // publish to catalog + open detail
+        .map(note: "project → SlideshowReturn", SlideshowReturn.init(from:))
+        .effect(note: "publish to catalog + open detail") { kernel, result in
             await publishSlideshow(kernel, result)
         }
         .seal()

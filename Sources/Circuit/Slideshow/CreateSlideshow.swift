@@ -13,8 +13,8 @@ import Contract
 package func createSlideshowPipe() -> Pipe<CreateSlideshowPayload, SlideshowReturn> {
     pipeline(Callable.Compute.Slideshow.create)             // CreateSlideshowPayload -> Slideshow
         .tap(Callable.Infrastructure.Slideshow.save)        // persist, keep the Slideshow flowing
-        .map(SlideshowReturn.init(from:))                   // project -> SlideshowReturn
-        .effect { kernel, created in                        // append the catalog row…
+        .map(note: "project → SlideshowReturn", SlideshowReturn.init(from:))
+        .effect(note: "append catalog row + open in editor") { kernel, created in
             await kernel.buffer.mutate(LibraryState.self) {
                 $0.slideshows.append(SlideshowSummaryReturn(from: created))
             }

@@ -47,13 +47,15 @@ package struct WiringStage {
     let note: String?
     var branches: [String] = []
 
-    /// Map a Kernel `StageDescriptor` (the static shape) into a view node, adding
-    /// the prose `note` from the per-symbol overlay and prettifying the type name.
+    /// Map a Kernel `StageDescriptor` (the static shape) into a view node. The
+    /// prose `note` is the symbol's own `description` — lifted by the `@callable`
+    /// macro from the port method's doc comment — so there's no separate lookup to
+    /// maintain. Anonymous stages (map/effect) carry none and show only their kind.
     package init(descriptor: StageDescriptor) {
         self.kind = StageKind(rawValue: descriptor.kind.rawValue) ?? .effect
         self.symbol = descriptor.symbolID
         self.flows = prettyType(descriptor.flows)
-        self.note = descriptor.symbolID.flatMap { symbolDescriptions[$0] }
+        self.note = descriptor.description
         self.branches = []
     }
 }
@@ -78,21 +80,6 @@ package struct WiringPipeline {
         self.note = note
     }
 }
-
-/// Prose "what this part does", keyed by symbol id — the seed of descriptions-as-data
-/// (a later step moves this onto the `Symbol`s themselves). Anonymous stages
-/// (map/effect) have no symbol, so they show only their kind.
-private let symbolDescriptions: [String: String] = [
-    "Compute.Slideshow.create":         "build a new slideshow from the request",
-    "Compute.Slideshow.update":         "apply name / photo changes",
-    "Compute.Slideshow.applyConfig":    "apply duration / transition / loop",
-    "Compute.Image.addDroppedFiles":    "resolve dropped files to image ids",
-    "Infrastructure.Slideshow.fetch":   "load the full slideshow by id",
-    "Infrastructure.Slideshow.save":    "persist the slideshow to the store",
-    "Infrastructure.Slideshow.delete":  "delete the slideshow from the store",
-    "Infrastructure.Library.fetchSummaries": "load the path-free catalog summaries",
-    "Infrastructure.Config.save":       "persist the global config",
-]
 
 /// `\(T.self)` renders `Optional<X>`/`Array<X>`; show the sugar form instead.
 private func prettyType(_ raw: String) -> String {
@@ -257,7 +244,7 @@ struct WiringGraphView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         RoundedRectangle(cornerRadius: 3).fill(layerColor(stage.symbol)).frame(width: 11, height: 11)
-                        Text(stage.symbol ?? "anonymous").font(.system(.headline, design: .monospaced))
+                        Text(stage.symbol ?? stage.note ?? "anonymous").font(.system(.headline, design: .monospaced))
                         Text(stage.kind.rawValue)
                             .font(.system(.caption, design: .monospaced))
                             .padding(.horizontal, 6).padding(.vertical, 2)
@@ -375,12 +362,23 @@ private struct StageNodeView: View {
             Text(stage.kind.rawValue)
                 .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .foregroundStyle(layerColor(stage.symbol))
-            Text(stage.symbol ?? "anonymous")
-                .font(.system(.title3, design: .monospaced))
-                .foregroundStyle(isAnonymous ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
-            if !mainLineOnly, let note = stage.note {
-                Text(note).font(.callout).foregroundStyle(.secondary)
+            if let symbol = stage.symbol {
+                Text(symbol)
+                    .font(.system(.title3, design: .monospaced))
+                    .foregroundStyle(.primary)
+                if !mainLineOnly, let note = stage.note {
+                    Text(note).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if let note = stage.note, !mainLineOnly {
+                // Anonymous: its label is the node's identity — show it as the headline.
+                Text(note).font(.callout).foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
+            } else {
+                // Unlabelled (or main-line-only): fall back to the kind, never a bare "anonymous".
+                Text(stage.kind.rawValue)
+                    .font(.system(.title3, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
             if !mainLineOnly {
                 ForEach(stage.branches, id: \.self) { branch in
@@ -397,7 +395,7 @@ private struct StageNodeView: View {
             Text(stage.kind.rawValue)
                 .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .foregroundStyle(.gray)
-            Text(stage.note ?? "anonymous").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(stage.note ?? stage.kind.rawValue).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, 14).padding(.vertical, 9)

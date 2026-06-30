@@ -16,13 +16,17 @@ import Kernel
 /// The Slideshow compute device's operation surface.
 @callable("Compute.Slideshow")
 package protocol SlideshowComputing: Sendable {
+    /// Build a new slideshow value from the create request (pure, no I/O).
     func create(_ payload: CreateSlideshowPayload) -> Slideshow
+    /// Apply the requested name and photo changes to the current slideshow (pure).
     func update(_ payload: UpdateSlideshowComputePayload) -> Slideshow
+    /// Apply duration, transition and loop settings to the current slideshow (pure).
     func applyConfig(_ payload: ApplyConfigComputePayload) -> Slideshow
 }
 
 /// The Image compute device's operation surface.
 @callable("Compute.Image")
 package protocol ImageComputing: Sendable {
+    /// Resolve dropped file URLs to image identifiers, skipping ones already present.
     func addDroppedFiles(_ payload: AddDroppedFilesPayload) -> [String]
 }

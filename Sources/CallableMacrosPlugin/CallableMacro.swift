@@ -1,10 +1,57 @@
 import SwiftSyntax
 import SwiftSyntaxMacros
 import SwiftCompilerPlugin
+import SwiftDiagnostics
+import Foundation
 
 private struct CallableMacroError: Error, CustomStringConvertible {
     let description: String
     init(_ description: String) { self.description = description }
+}
+
+/// Warning surfaced when a `@callable` requirement carries no doc comment — its
+/// generated `Symbol` gets no `description`, so the part shows blank in the wiring
+/// graph. The "hole" is made visible at build time (cf. the wiring-totality stance).
+private struct UndocumentedCallable: DiagnosticMessage {
+    let name: String
+    var message: String {
+        "@callable method '\(name)' has no doc comment — its symbol will carry no description (blank in the wiring graph)"
+    }
+    var diagnosticID: MessageID { MessageID(domain: "CallableMacro", id: "undocumented") }
+    var severity: DiagnosticSeverity { .warning }
+}
+
+/// The `///` (or `/** */`) doc comment attached to a declaration, collapsed to a
+/// single line — lifted into the generated `Symbol.description` so "what this part
+/// does" is data on the symbol, sourced from the one place it's declared.
+private func docComment(of decl: some SyntaxProtocol) -> String? {
+    var lines: [String] = []
+    for piece in decl.leadingTrivia {
+        switch piece {
+        case .docLineComment(let text):                       // "/// …"
+            let body = text.hasPrefix("///") ? String(text.dropFirst(3)) : text
+            let trimmed = body.trimmingCharacters(in: .whitespaces)
+            if !trimmed.isEmpty { lines.append(trimmed) }
+        case .docBlockComment(let text):                      // "/** … */"
+            var body = text
+            if body.hasPrefix("/**") { body = String(body.dropFirst(3)) }
+            if body.hasSuffix("*/") { body = String(body.dropLast(2)) }
+            for raw in body.split(whereSeparator: { $0 == "\n" || $0 == "\r" }) {
+                var line = raw.trimmingCharacters(in: .whitespaces)
+                if line.hasPrefix("*") { line = String(line.dropFirst()).trimmingCharacters(in: .whitespaces) }
+                if !line.isEmpty { lines.append(line) }
+            }
+        default:
+            break
+        }
+    }
+    let joined = lines.joined(separator: " ")
+    return joined.isEmpty ? nil : joined
+}
+
+/// Escape a string for embedding inside a Swift `"…"` literal in generated source.
+private func swiftStringLiteral(_ s: String) -> String {
+    "\"" + s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"") + "\""
 }
 
 /// `@callable("Id.Prefix")` attached to a device protocol generates a peer
@@ -16,6 +63,8 @@ private struct CallableMacroError: Error, CustomStringConvertible {
 /// the implementations (forward exactness), `any Protocol` use forces the surface
 /// (reverse exactness), and this macro generates the dispatch keys + wiring — one
 /// `register` per requirement, so none can be forgotten (compile-time totality).
+/// Each method's `///` doc comment is lifted into its `Symbol.description`, so a
+/// part's documentation is data on the symbol, written where the method is declared.
 public struct CallableMacro: PeerMacro {
     public static func expansion(
         of node: AttributeSyntax,
@@ -70,7 +119,17 @@ public struct CallableMacro: PeerMacro {
                 callArgs.append(label == "_" ? "payload" : "\(label): payload")
             }
 
-            symbolLines.append(#"    package static let \#(name) = Symbol<\#(payloadType), \#(output)>("\#(prefix).\#(name)")"#)
+            // The part's description: the method's doc comment, lifted as data.
+            // A missing one is a visible hole — warned, not failed.
+            let descriptionArg: String
+            if let doc = docComment(of: fn) {
+                descriptionArg = ", description: \(swiftStringLiteral(doc))"
+            } else {
+                descriptionArg = ""
+                context.diagnose(Diagnostic(node: fn.name, message: UndocumentedCallable(name: name)))
+            }
+
+            symbolLines.append(#"    package static let \#(name) = Symbol<\#(payloadType), \#(output)>("\#(prefix).\#(name)"\#(descriptionArg))"#)
             wireLines.append("        builder.register(\(name)) { \(closureParams.joined(separator: ", ")) in \(effectPrefix)device.\(name)(\(callArgs.joined(separator: ", "))) }")
         }
 

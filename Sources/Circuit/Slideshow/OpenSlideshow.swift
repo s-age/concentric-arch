@@ -11,12 +11,12 @@ import Contract
 /// without running. Captures `payload.id` in the guard's error.
 package func openSlideshowPipe(_ payload: OpenSlideshowPayload) -> Pipe<UUID, SlideshowReturn> {
     pipeline(Callable.Infrastructure.Slideshow.fetch)                 // UUID -> Slideshow?
-        .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
+        .pipe(note: "require it exists, else fail") { _, existing -> Verb<Slideshow> in
             guard let existing else { return .fail(NotFoundError.slideshow(payload.id)) }
             return .next(existing)
         }
-        .map(SlideshowReturn.init(from:))                           // project -> SlideshowReturn
-        .effect { kernel, result in
+        .map(note: "project → SlideshowReturn", SlideshowReturn.init(from:))
+        .effect(note: "write into SlideshowState (open detail)") { kernel, result in
             await kernel.buffer.mutate(SlideshowState.self) { $0.slideshow = result }
         }
         .seal()

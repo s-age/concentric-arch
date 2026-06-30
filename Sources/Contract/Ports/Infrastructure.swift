@@ -31,14 +31,19 @@ package protocol LibraryStoring: Sendable {
 /// The single-slideshow store surface — the full, path-bearing unit's CRUD.
 @callable("Infrastructure.Slideshow")
 package protocol SlideshowStoring: Sendable {
+    /// Load the full, path-bearing slideshow by id (nil if none exists).
     func fetch(id: UUID) async throws -> Slideshow?
+    /// Persist the slideshow to the store (insert or replace by id).
     func save(_ slideshow: Slideshow) async throws
+    /// Delete the slideshow with this id from the store.
     func delete(id: UUID) async throws
 }
 
 /// The config store surface.
 @callable("Infrastructure.Config")
 package protocol ConfigStoring: Sendable {
+    /// Load the persisted global slideshow config.
     func load() async throws -> SlideshowConfig
+    /// Persist the global slideshow config.
     func save(_ config: SlideshowConfig) async throws
 }
