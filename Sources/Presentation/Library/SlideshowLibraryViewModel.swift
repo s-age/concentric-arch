@@ -32,7 +32,7 @@ package final class SlideshowLibraryViewModel {
         // Fire-and-forget command: the pipeline writes the list (and isLoading)
         // into the buffer; observation refreshes the UI, and a failure surfaces in
         // the global banner via the kernel's error sink.
-        kernel.dispatch(Circuit.Slideshow.fetchAll, FetchSlideshowsPayload())
+        kernel.dispatch(SlideshowCircuitingCallable.fetchAll, FetchSlideshowsPayload())
     }
 
     /// Creates an empty slideshow, persists it, and opens it for editing.
@@ -42,7 +42,7 @@ package final class SlideshowLibraryViewModel {
         // new slideshow to the buffer; the list refreshes via observation.
         let id = UUID()
         kernel.dispatch(
-            Circuit.Slideshow.create,
+            SlideshowCircuitingCallable.create,
             CreateSlideshowPayload(
                 id: id,
                 name: "New Slideshow",
@@ -63,7 +63,7 @@ package final class SlideshowLibraryViewModel {
         guard let slideshow = selectedSlideshow else { return }
         let existing = slideshow.slides.map(\.localIdentifier)
         let added = (try? await kernel.call(
-            Compute.Image.addDroppedFiles,
+            ImageComputingCallable.addDroppedFiles,
             AddDroppedFilesPayload(urls: urls, existingIdentifiers: existing)
         )) ?? []
         guard !added.isEmpty else { return }
@@ -89,7 +89,7 @@ package final class SlideshowLibraryViewModel {
 
     func delete(id: UUID) async {
         // The pipeline removes it from the buffer; we only manage local selection.
-        kernel.dispatch(Circuit.Slideshow.delete, DeleteSlideshowPayload(id: id))
+        kernel.dispatch(SlideshowCircuitingCallable.delete, DeleteSlideshowPayload(id: id))
         if selectedID == id { selectedID = nil }
     }
 
@@ -99,7 +99,7 @@ package final class SlideshowLibraryViewModel {
     /// buffer in place, so there is nothing to splice here.
     private func apply(to slideshow: SlideshowReturn, name: String, identifiers: [String]) async {
         kernel.dispatch(
-            Circuit.Slideshow.update,
+            SlideshowCircuitingCallable.update,
             UpdateSlideshowPayload(id: slideshow.id, name: name, localIdentifiers: identifiers)
         )
     }

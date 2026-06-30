@@ -3,7 +3,7 @@ import Contract
 
 /// Pure image-path filtering: keeps supported image files that aren't already
 /// present. Wired in by `ImageComputeDriver`.
-package struct ImageCompute {
+package struct ImageCompute: ImageComputing {
     private static let supportedExtensions: Set<String> = ["jpg", "jpeg", "png", "heic", "webp", "gif", "tiff"]
 
     package init() {}

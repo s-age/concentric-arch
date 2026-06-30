@@ -5,11 +5,15 @@ import Compute
 
 /// The *driver* for the `Compute.Image` port — leaf handler over pure file filtering.
 package struct ImageComputeDriver {
-    package init() {}
+    /// Existential surface only (reverse exactness). Defaulted (pure device),
+    /// injectable for tests.
+    private let device: any ImageComputing
+
+    package init(device: any ImageComputing = ImageCompute()) {
+        self.device = device
+    }
 
     package func wire(into builder: KernelBuilder) {
-        builder.register(Contract.Compute.Image.addDroppedFiles) { payload in
-            ImageCompute().addDroppedFiles(payload)
-        }
+        ImageComputingCallable.wire(device, into: builder)
     }
 }
