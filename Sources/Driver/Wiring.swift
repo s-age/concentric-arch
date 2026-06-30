@@ -12,8 +12,8 @@ package func wireAllDrivers(
     library: any SlideshowStoring,
     config: any ConfigStoring
 ) {
-    // Infrastructure ports (leaf handlers → repositories/stores).
-    LibraryDriver(repository: library).wire(into: builder)
+    // Infrastructure ports (leaf handlers → stores).
+    LibraryDriver(store: library).wire(into: builder)
     InfrastructureConfigDriver(store: config).wire(into: builder)
     // Compute device (leaf handlers → pure business logic).
     SlideshowComputeDriver().wire(into: builder)

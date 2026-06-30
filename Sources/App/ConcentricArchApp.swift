@@ -72,9 +72,8 @@ struct ConcentricArchApp: App {
             bufferBuilder.allocate(TimeTravelState())
             #endif
 
-            // Wire the Driver(port + repository) into the kernel so that
-            // `kernel.call(Infrastructure.Library.<method>, payload)` dispatches
-            // through LibraryDriver to the repository.
+            // Wire the drivers into the kernel so that a call/dispatch for a
+            // Library symbol routes through LibraryDriver to the injected store.
             let builder = KernelBuilder()
             // One shared wiring list (in Driver), used here and by the wiring
             // smoke test — so a forgotten driver can't slip through App-side only.

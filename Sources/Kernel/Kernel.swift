@@ -43,7 +43,7 @@ package final class KernelBuilder {
     package var boundSymbolIDs: Set<String> { Set(handlers.keys) }
 
     /// Bind a *leaf* handler — one that fulfils the symbol on its own and makes
-    /// no further kernel calls (e.g. an Infrastructure port hitting a repository).
+    /// no further kernel calls (e.g. an Infrastructure port hitting a store).
     /// The public signature is fully typed (`(P) async throws -> O`); the unsafe
     /// `as!` that erases to `Any` is confined here, and is safe because the same
     /// `Symbol` pins both ends. The plain return is implicitly the `.next` verb.

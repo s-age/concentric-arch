@@ -13,7 +13,7 @@ import Kernel
 /// sit in Contract — letting Circuit call them through the mesh without depending
 /// on the Infrastructure module.
 
-/// The slideshow repository surface.
+/// The slideshow store surface.
 @callable("Infrastructure.Library")
 package protocol SlideshowStoring: Sendable {
     func fetchAll() async throws -> [Slideshow]
