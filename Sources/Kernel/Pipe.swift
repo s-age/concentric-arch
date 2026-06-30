@@ -28,11 +28,16 @@ package struct StageDescriptor: Sendable {
     package let symbolID: String?
     /// Type name of the value leaving this stage — the label on its `.next` wire.
     package let flows: String
+    /// "What this part does", lifted from the invoked `Symbol`'s `description`
+    /// (which the `@callable` macro fills from the port method's doc comment).
+    /// `nil` for an anonymous stage or an undocumented symbol.
+    package let description: String?
 
-    package init(kind: Kind, symbolID: String?, flows: String) {
+    package init(kind: Kind, symbolID: String?, flows: String, description: String? = nil) {
         self.kind = kind
         self.symbolID = symbolID
         self.flows = flows
+        self.description = description
     }
 }
 
@@ -94,7 +99,7 @@ package struct PipeBuilder<Input, Cursor> {
     /// `.abort`/`.divert`/`.fail` from here without any wrapper at this layer.
     package func pipe<Next>(_ symbol: Symbol<Cursor, Next>) -> PipeBuilder<Input, Next> {
         appending(PipeStage(
-            descriptor: StageDescriptor(kind: .pipe, symbolID: symbol.id, flows: "\(Next.self)"),
+            descriptor: StageDescriptor(kind: .pipe, symbolID: symbol.id, flows: "\(Next.self)", description: symbol.description),
             run: { kernel, value in try await kernel.invoke(symbol.id, value as! Cursor) }
         ))
     }
@@ -109,7 +114,7 @@ package struct PipeBuilder<Input, Cursor> {
         _ adapt: @escaping @Sendable (Cursor) -> SymbolInput
     ) -> PipeBuilder<Input, Next> {
         appending(PipeStage(
-            descriptor: StageDescriptor(kind: .pipeAdapt, symbolID: symbol.id, flows: "\(Next.self)"),
+            descriptor: StageDescriptor(kind: .pipeAdapt, symbolID: symbol.id, flows: "\(Next.self)", description: symbol.description),
             run: { kernel, value in try await kernel.invoke(symbol.id, adapt(value as! Cursor)) }
         ))
     }
@@ -133,7 +138,7 @@ package struct PipeBuilder<Input, Cursor> {
     /// `pipeline(create).tap(save)`.
     package func tap(_ symbol: Symbol<Cursor, Void>) -> PipeBuilder<Input, Cursor> {
         appending(PipeStage(
-            descriptor: StageDescriptor(kind: .tap, symbolID: symbol.id, flows: "\(Cursor.self)"),
+            descriptor: StageDescriptor(kind: .tap, symbolID: symbol.id, flows: "\(Cursor.self)", description: symbol.description),
             run: { kernel, value in
                 switch try await kernel.invoke(symbol.id, value as! Cursor) {
                 case .next: return .next(value)            // discard Void, forward the original
@@ -177,7 +182,7 @@ package struct PipeBuilder<Input, Cursor> {
 package func pipeline<P, O>(_ symbol: Symbol<P, O>) -> PipeBuilder<P, O> {
     PipeBuilder<P, O>(
         stages: [PipeStage(
-            descriptor: StageDescriptor(kind: .pipe, symbolID: symbol.id, flows: "\(O.self)"),
+            descriptor: StageDescriptor(kind: .pipe, symbolID: symbol.id, flows: "\(O.self)", description: symbol.description),
             run: { kernel, value in try await kernel.invoke(symbol.id, value as! P) }
         )],
         inputType: "\(P.self)"

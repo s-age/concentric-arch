@@ -47,13 +47,15 @@ package struct WiringStage {
     let note: String?
     var branches: [String] = []
 
-    /// Map a Kernel `StageDescriptor` (the static shape) into a view node, adding
-    /// the prose `note` from the per-symbol overlay and prettifying the type name.
+    /// Map a Kernel `StageDescriptor` (the static shape) into a view node. The
+    /// prose `note` is the symbol's own `description` — lifted by the `@callable`
+    /// macro from the port method's doc comment — so there's no separate lookup to
+    /// maintain. Anonymous stages (map/effect) carry none and show only their kind.
     package init(descriptor: StageDescriptor) {
         self.kind = StageKind(rawValue: descriptor.kind.rawValue) ?? .effect
         self.symbol = descriptor.symbolID
         self.flows = prettyType(descriptor.flows)
-        self.note = descriptor.symbolID.flatMap { symbolDescriptions[$0] }
+        self.note = descriptor.description
         self.branches = []
     }
 }
@@ -78,21 +80,6 @@ package struct WiringPipeline {
         self.note = note
     }
 }
-
-/// Prose "what this part does", keyed by symbol id — the seed of descriptions-as-data
-/// (a later step moves this onto the `Symbol`s themselves). Anonymous stages
-/// (map/effect) have no symbol, so they show only their kind.
-private let symbolDescriptions: [String: String] = [
-    "Compute.Slideshow.create":         "build a new slideshow from the request",
-    "Compute.Slideshow.update":         "apply name / photo changes",
-    "Compute.Slideshow.applyConfig":    "apply duration / transition / loop",
-    "Compute.Image.addDroppedFiles":    "resolve dropped files to image ids",
-    "Infrastructure.Slideshow.fetch":   "load the full slideshow by id",
-    "Infrastructure.Slideshow.save":    "persist the slideshow to the store",
-    "Infrastructure.Slideshow.delete":  "delete the slideshow from the store",
-    "Infrastructure.Library.fetchSummaries": "load the path-free catalog summaries",
-    "Infrastructure.Config.save":       "persist the global config",
-]
 
 /// `\(T.self)` renders `Optional<X>`/`Array<X>`; show the sugar form instead.
 private func prettyType(_ raw: String) -> String {

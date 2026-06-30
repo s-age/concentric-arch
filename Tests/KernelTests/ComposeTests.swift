@@ -500,3 +500,13 @@ func tapAndVerbStagesAreLabelledInTheDescriptor() {
     #expect(pipe.descriptors.map(\.kind) == [.pipe, .tap, .verb])
     #expect(pipe.descriptors.map(\.symbolID) == ["test.increment", "test.erase", nil])
 }
+
+@Test
+func symbolDescriptionFlowsIntoTheDescriptor() {
+    // A documented symbol carries its description; the pipe builder lifts it into
+    // the stage descriptor (anonymous stages carry none).
+    let documented = Symbol<Int, Int>("test.documented", description: "doubles the input")
+    let pipe = pipeline(documented).map { $0 + 1 }.seal()
+
+    #expect(pipe.descriptors.map(\.description) == ["doubles the input", nil])
+}

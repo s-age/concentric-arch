@@ -15,6 +15,7 @@ import Kernel
 /// the Infrastructure ports. Forward-only: publishes into `LibraryState`.
 @callable("Circuit.Library")
 package protocol LibraryCircuiting: Sendable {
+    /// Reload the whole catalog (path-free summaries) into LibraryState.
     func fetchAll(_ kernel: Kernel, _ payload: FetchSlideshowsPayload) async throws
 }
 
@@ -23,9 +24,13 @@ package protocol LibraryCircuiting: Sendable {
 /// (the catalog row) and `SlideshowState` (the open detail); Presentation observes.
 @callable("Circuit.Slideshow")
 package protocol SlideshowCircuiting: Sendable {
+    /// Create a slideshow, persist it, and open it in the editor.
     func create(_ kernel: Kernel, _ payload: CreateSlideshowPayload) async throws
+    /// Apply name / photo edits to a slideshow, persist, and republish it.
     func update(_ kernel: Kernel, _ payload: UpdateSlideshowPayload) async throws
+    /// Apply config (duration / transition / loop) to a slideshow, persist, and republish.
     func updateConfig(_ kernel: Kernel, _ payload: UpdateSlideshowConfigPayload) async throws
+    /// Delete a slideshow and drop it from the catalog and open detail.
     func delete(_ kernel: Kernel, _ payload: DeleteSlideshowPayload) async throws
     /// Load one slideshow's full detail into `SlideshowState` (on demand).
     func open(_ kernel: Kernel, _ payload: OpenSlideshowPayload) async throws
@@ -36,5 +41,6 @@ package protocol SlideshowCircuiting: Sendable {
 /// The config orchestration surface.
 @callable("Circuit.Config")
 package protocol ConfigCircuiting: Sendable {
+    /// Build and persist the global slideshow config.
     func save(_ kernel: Kernel, _ payload: SaveConfigPayload) async throws
 }
