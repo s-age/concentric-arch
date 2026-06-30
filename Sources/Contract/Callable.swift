@@ -16,6 +16,7 @@ import Kernel
 package enum Callable {
     /// The orchestration layer — composing handlers that route via the kernel.
     package enum Circuit {
+        package typealias Library   = LibraryCircuitingCallable
         package typealias Slideshow = SlideshowCircuitingCallable
         package typealias Config    = ConfigCircuitingCallable
     }
@@ -26,7 +27,8 @@ package enum Callable {
     }
     /// The I/O layer — leaf handlers backed by stores.
     package enum Infrastructure {
-        package typealias Library = SlideshowStoringCallable
-        package typealias Config  = ConfigStoringCallable
+        package typealias Library   = LibraryStoringCallable
+        package typealias Slideshow = SlideshowStoringCallable
+        package typealias Config    = ConfigStoringCallable
     }
 }

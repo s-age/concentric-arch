@@ -1,14 +1,15 @@
 import SwiftUI
+import Contract
 
 struct SlideshowPlayerView: View {
     let viewModel: SlideshowPlayerViewModel
     let onBack: () -> Void
-    let onSpriteMode: ((Int) -> Void)?
+    let onSpriteMode: ((SlideshowReturn, Int) -> Void)?
 
     init(
         viewModel: SlideshowPlayerViewModel,
         onBack: @escaping () -> Void,
-        onSpriteMode: ((Int) -> Void)? = nil
+        onSpriteMode: ((SlideshowReturn, Int) -> Void)? = nil
     ) {
         self.viewModel = viewModel
         self.onBack = onBack
@@ -59,7 +60,7 @@ struct SlideshowPlayerView: View {
                 HStack(spacing: 0) {
                     if let onSpriteMode {
                         Button {
-                            onSpriteMode(viewModel.currentIndex)
+                            onSpriteMode(viewModel.slideshow, viewModel.currentIndex)
                         } label: {
                             Image(systemName: "pip.enter")
                                 .font(.title2)
@@ -127,9 +128,12 @@ struct SlideshowPlayerView: View {
         .onReceive(NotificationCenter.default.publisher(for: NSWindow.didEnterFullScreenNotification)) { _ in
             viewModel.windowDidEnterFullScreen()
         }
-        .task {
-            await viewModel.loadCurrentImage()
-            viewModel.play()
+        .task { viewModel.requestOpen() }
+        // Re-runs when the on-demand open lands (slide count 0 → N), and once on
+        // appear for the value-seeded sprite: load the current image and autoplay.
+        .task(id: viewModel.displayedSlides.count) {
+            guard !viewModel.displayedSlides.isEmpty else { return }
+            await viewModel.slidesDidBecomeAvailable()
         }
     }
 

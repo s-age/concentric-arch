@@ -9,16 +9,19 @@ import Contract
 /// protocol, so no operation can be left unbound.
 package func wireAllDrivers(
     into builder: KernelBuilder,
-    library: any SlideshowStoring,
+    slideshowStore: any LibraryStoring & SlideshowStoring,
     config: any ConfigStoring
 ) {
-    // Infrastructure ports (leaf handlers → stores).
-    LibraryDriver(store: library).wire(into: builder)
+    // Infrastructure ports (leaf handlers → stores). One SwiftData actor backs both
+    // slideshow ports: Library (catalog read) and Slideshow (per-slideshow CRUD).
+    InfrastructureLibraryDriver(store: slideshowStore).wire(into: builder)
+    InfrastructureSlideshowDriver(store: slideshowStore).wire(into: builder)
     InfrastructureConfigDriver(store: config).wire(into: builder)
     // Compute device (leaf handlers → pure business logic).
     SlideshowComputeDriver().wire(into: builder)
     ImageComputeDriver().wire(into: builder)
     // Circuit device (composing handlers → orchestration that routes via the kernel).
-    SlideshowDriver().wire(into: builder)
+    CircuitLibraryDriver().wire(into: builder)
+    CircuitSlideshowDriver().wire(into: builder)
     CircuitConfigDriver().wire(into: builder)
 }

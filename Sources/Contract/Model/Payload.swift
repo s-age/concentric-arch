@@ -31,9 +31,10 @@ package struct CreateSlideshowPayload {
 package struct UpdateSlideshowPayload {
     package let id: UUID
     package let name: String
-    package let localIdentifiers: [String]
+    /// `nil` keeps the persisted slides (a pure rename); a value replaces them.
+    package let localIdentifiers: [String]?
 
-    package init(id: UUID, name: String, localIdentifiers: [String]) {
+    package init(id: UUID, name: String, localIdentifiers: [String]?) {
         self.id = id
         self.name = name
         self.localIdentifiers = localIdentifiers
@@ -64,6 +65,20 @@ package struct DeleteSlideshowPayload {
     package init(id: UUID) {
         self.id = id
     }
+}
+
+/// Load the full, path-bearing slideshow into `SlideshowState`.
+package struct OpenSlideshowPayload {
+    package let id: UUID
+
+    package init(id: UUID) {
+        self.id = id
+    }
+}
+
+/// Clear `SlideshowState` — nothing is open, so no slides stay resident.
+package struct CloseSlideshowPayload {
+    package init() {}
 }
 
 // MARK: Config
@@ -100,9 +115,10 @@ package struct AddDroppedFilesPayload {
 package struct UpdateSlideshowComputePayload {
     package let current: Slideshow
     package let name: String
-    package let localIdentifiers: [String]
+    /// `nil` keeps `current.slides` (a pure rename); a value rebuilds them.
+    package let localIdentifiers: [String]?
 
-    package init(current: Slideshow, name: String, localIdentifiers: [String]) {
+    package init(current: Slideshow, name: String, localIdentifiers: [String]?) {
         self.current = current
         self.name = name
         self.localIdentifiers = localIdentifiers

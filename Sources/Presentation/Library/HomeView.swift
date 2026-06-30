@@ -3,7 +3,7 @@ import Contract
 
 struct HomeView: View {
     let viewModel: SlideshowLibraryViewModel
-    let onSlideshowSelected: (SlideshowReturn) -> Void
+    let onSlideshowSelected: (SlideshowSummaryReturn) -> Void
 
     var body: some View {
         GeometryReader { geometry in

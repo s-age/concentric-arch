@@ -13,10 +13,16 @@ import Contract
 // @ModelActor stores cannot themselves be `package` — they would violate
 // "witness must be as accessible as its type". Instead we keep all SwiftData
 // types internal to this module and expose a narrow package surface: the concrete
-// stores conform to the `SlideshowStoring` / `ConfigStoring` protocols (declared
-// in Contract, where `@callable` generates their dispatch symbols), plus factories
-// that build the concrete types here, where the internal initialisers are visible.
+// stores conform to the `LibraryStoring` / `SlideshowStoring` / `ConfigStoring`
+// protocols (declared in Contract, where `@callable` generates their dispatch
+// symbols), plus factories that build the concrete types here, where the internal
+// initialisers are visible.
+//
+// One SwiftData actor backs both slideshow ports: `LibraryStoring` (catalog read)
+// and `SlideshowStoring` (per-slideshow CRUD) hit the same container, so a single
+// store keeps the catalog count consistent with saves.
 
+extension SlideshowStore: LibraryStoring {}
 extension SlideshowStore: SlideshowStoring {}
 extension ConfigStore: ConfigStoring {}
 
@@ -30,7 +36,7 @@ package func makeModelContainer(url: URL) throws -> ModelContainer {
     )
 }
 
-package func makeSlideshowStore(_ container: ModelContainer) -> any SlideshowStoring {
+package func makeSlideshowStore(_ container: ModelContainer) -> any LibraryStoring & SlideshowStoring {
     SlideshowStore(modelContainer: container)
 }
 

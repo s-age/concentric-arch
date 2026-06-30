@@ -65,6 +65,7 @@ struct ConcentricArchApp: App {
             // `kernel.buffer` and Circuit writes into.
             let bufferBuilder = BufferBuilder()
             bufferBuilder.allocate(LibraryState())
+            bufferBuilder.allocate(SlideshowState())
             bufferBuilder.allocate(AppErrorState())
             #if DEBUG
             bufferBuilder.allocate(TraceState())
@@ -73,13 +74,13 @@ struct ConcentricArchApp: App {
             #endif
 
             // Wire the drivers into the kernel so that a call/dispatch for a
-            // Library symbol routes through LibraryDriver to the injected store.
+            // Library symbol routes through InfrastructureLibraryDriver to the store.
             let builder = KernelBuilder()
             // One shared wiring list (in Driver), used here and by the wiring
             // smoke test — so a forgotten driver can't slip through App-side only.
             wireAllDrivers(
                 into: builder,
-                library: makeSlideshowStore(modelContainer),
+                slideshowStore: makeSlideshowStore(modelContainer),
                 config: makeConfigStore(modelContainer)
             )
             // The kernel routes a dispatched command's failure here; App owns the
@@ -113,13 +114,16 @@ struct ConcentricArchApp: App {
                     // not part of the world we rewind.
                     await MainActor.run {
                         let library = buffer.read(LibraryState.self)
+                        let openSlideshow = buffer.read(SlideshowState.self)
                         let appError = buffer.read(AppErrorState.self)
                         let dumps = [
                             StoreDump(name: "\(LibraryState.self)", value: prettyDump(library)),
+                            StoreDump(name: "\(SlideshowState.self)", value: prettyDump(openSlideshow)),
                             StoreDump(name: "\(AppErrorState.self)", value: prettyDump(appError)),
                         ]
                         let image: BufferImage = [
                             ObjectIdentifier(LibraryState.self): library,
+                            ObjectIdentifier(SlideshowState.self): openSlideshow,
                             ObjectIdentifier(AppErrorState.self): appError,
                         ]
                         buffer.mutate(BufferHistoryState.self) {
@@ -140,8 +144,10 @@ struct ConcentricArchApp: App {
                 library: SlideshowLibraryViewModel(kernel: kernel),
                 error: GlobalErrorViewModel(kernel: kernel),
                 timeTravel: TimeTravelViewModel(kernel: kernel),
-                makeSlideshowPlayerViewModel: { slideshow in
-                    SlideshowPlayerViewModel(slideshow: slideshow, kernel: kernel)
+                makeSlideshowPlayerViewModel: { summary in
+                    // Seed with a slides-less shell; the player loads the full,
+                    // path-bearing slideshow on demand via `SlideshowState`.
+                    SlideshowPlayerViewModel(slideshow: SlideshowReturn(shellFrom: summary), kernel: kernel)
                 },
                 makeSpritePlayerViewModel: { slideshow, initialIndex in
                     SlideshowPlayerViewModel(
