@@ -1,10 +1,10 @@
 import Kernel
 import Contract
 
-/// Pipeline: `Infrastructure.Library.fetch ▶ require-exists ▶ Compute.Slideshow.update ▶ Infrastructure.Library.save ▶ buffer.replace`
+/// Pipeline: `Infrastructure.Slideshow.fetch ▶ require-exists ▶ Compute.Slideshow.update ▶ Infrastructure.Slideshow.save ▶ buffer.replace`
 package func updateSlideshow(_ kernel: Kernel, _ payload: UpdateSlideshowPayload) async throws {
     try await kernel.run(
-        pipeline(Callable.Infrastructure.Library.fetch)                        // UUID -> Slideshow?
+        pipeline(Callable.Infrastructure.Slideshow.fetch)                        // UUID -> Slideshow?
             .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
                 guard let existing else { return .fail(NotFoundError.slideshow(payload.id)) }
                 return .next(existing)
@@ -16,14 +16,10 @@ package func updateSlideshow(_ kernel: Kernel, _ payload: UpdateSlideshowPayload
                     localIdentifiers: payload.localIdentifiers
                 )
             }
-            .tap(Callable.Infrastructure.Library.save)                         // persist, keep the Slideshow flowing
+            .tap(Callable.Infrastructure.Slideshow.save)                         // persist, keep the Slideshow flowing
             .map(SlideshowReturn.init(from:))                            // project -> SlideshowReturn
-            .effect { kernel, result in                                 // publish to the buffer
-                await kernel.buffer.mutate(LibraryState.self) { state in
-                    if let index = state.slideshows.firstIndex(where: { $0.id == result.id }) {
-                        state.slideshows[index] = result
-                    }
-                }
+            .effect { kernel, result in                                 // publish to catalog + open detail
+                await publishSlideshow(kernel, result)
             },
         payload.id
     )

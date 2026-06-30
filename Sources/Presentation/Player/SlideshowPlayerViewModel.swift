@@ -7,15 +7,22 @@ import Observation
 @Observable
 @MainActor
 package final class SlideshowPlayerViewModel {
-    /// Buffer-derived: the live slideshow comes from `LibraryState` (where every
-    /// `Circuit.Slideshow` command publishes), so a forward-only `updateConfig`
-    /// is reflected here via observation — no return value consumed. The seed is
-    /// the value the player was opened with, used only as a fallback if the row
-    /// is ever absent from the buffer.
+    /// Buffer-derived: the live, path-bearing slideshow comes from
+    /// `SlideshowState` (loaded on demand by `requestOpen()`), so a forward-only
+    /// `updateConfig` is reflected here via observation. We guard on `id` so a slot
+    /// holding a *different* slideshow reads as the seed instead.
+    ///
+    /// The seed is what the player was opened with: for the main player a
+    /// slides-less shell (the full set arrives via the open slot); for the sprite
+    /// panel the already-loaded full slideshow, handed over by value.
     var slideshow: SlideshowReturn {
-        kernel.buffer.read(LibraryState.self).slideshows.first { $0.id == seed.id } ?? seed
+        if let open = kernel.buffer.read(SlideshowState.self).slideshow, open.id == seed.id {
+            return open
+        }
+        return seed
     }
     private let seed: SlideshowReturn
+    private var hasStartedPlayback = false
     private(set) var currentIndex: Int = 0
     private(set) var currentNSImage: NSImage?
     private(set) var isPlaying: Bool = false
@@ -160,6 +167,29 @@ package final class SlideshowPlayerViewModel {
         showFilmstripOverlay()
     }
 
+    // MARK: - On-demand open
+
+    /// Ask the kernel to load this slideshow's full detail into the shared open
+    /// slot. No-op for the sprite panel, which was handed the full slideshow by
+    /// value and must not clobber the editor's selection in the slot.
+    func requestOpen() {
+        guard !isSpriteMode else { return }
+        // Already loaded (e.g. opened from the editor of the same slideshow) — skip
+        // the redundant fetch.
+        guard kernel.buffer.read(SlideshowState.self).slideshow?.id != seed.id else { return }
+        kernel.dispatch(Callable.Circuit.Slideshow.open, OpenSlideshowPayload(id: seed.id))
+    }
+
+    /// Load the current image and autoplay once the slides are available. Driven by
+    /// the view's `.task(id: displayedSlides.count)`, so it runs when the on-demand
+    /// open lands (count 0 → N) and immediately for the value-seeded sprite.
+    func slidesDidBecomeAvailable() async {
+        await loadCurrentImage()
+        guard !hasStartedPlayback else { return }
+        hasStartedPlayback = true
+        play()
+    }
+
     func loadCurrentImage() async {
         guard let slide = currentSlide else {
             currentNSImage = nil
@@ -183,9 +213,9 @@ package final class SlideshowPlayerViewModel {
             transition: slideshow.config.transition,
             loop: slideshow.config.loop
         )
-        // Fire-and-forget: the pipeline replaces the row in `LibraryState`, which
-        // the `slideshow` accessor reads back via observation; failures surface in
-        // the global banner.
+        // Fire-and-forget: the pipeline writes the updated config into `SlideshowState`
+        // (and the catalog row in `LibraryState`), which the `slideshow` accessor
+        // reads back via observation; failures surface in the global banner.
         kernel.dispatch(Callable.Circuit.Slideshow.updateConfig, request)
         if isPlaying { play() }
     }

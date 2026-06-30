@@ -84,3 +84,24 @@ package struct Slideshow: Identifiable, Equatable, Sendable {
         self.createdAt = createdAt
     }
 }
+
+/// The catalog view of a slideshow: everything the library list needs, *minus the
+/// slides*. Holding the path-bearing `slides` for every slideshow at once is the
+/// memory cost we avoid — the full `Slideshow` is loaded on demand only for the
+/// one being opened. Infrastructure produces this without materializing slide rows
+/// (it counts them); Circuit projects it to `SlideshowSummaryReturn`.
+package struct SlideshowSummary: Identifiable, Equatable, Sendable {
+    package let id: UUID
+    package var name: String
+    package var slideCount: Int
+    package var config: SlideshowConfig
+    package var createdAt: Date
+
+    package init(id: UUID, name: String, slideCount: Int, config: SlideshowConfig, createdAt: Date) {
+        self.id = id
+        self.name = name
+        self.slideCount = slideCount
+        self.config = config
+        self.createdAt = createdAt
+    }
+}

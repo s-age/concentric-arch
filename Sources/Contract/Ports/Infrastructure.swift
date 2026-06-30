@@ -12,11 +12,25 @@ import Kernel
 /// The protocols live HERE rather than in Infrastructure so the generated symbols
 /// sit in Contract — letting Circuit call them through the mesh without depending
 /// on the Infrastructure module.
+///
+/// The slideshow persistence is split into two ports along the same
+/// `library` / `slideshow` axis as Circuit/Compute: `LibraryStoring` (the path-free
+/// catalog read) and `SlideshowStoring` (per-slideshow CRUD). One SwiftData actor
+/// backs both — see `Infrastructure.swift`.
 
-/// The slideshow store surface.
+/// The library (catalog) store surface — the path-free list. Split from the
+/// per-slideshow CRUD below so the two read along the same `library` / `slideshow`
+/// axis as the Circuit and Compute ports.
 @callable("Infrastructure.Library")
+package protocol LibraryStoring: Sendable {
+    /// Catalog read for the library list — counts slides without materializing
+    /// their rows, so no file paths are loaded.
+    func fetchSummaries() async throws -> [SlideshowSummary]
+}
+
+/// The single-slideshow store surface — the full, path-bearing unit's CRUD.
+@callable("Infrastructure.Slideshow")
 package protocol SlideshowStoring: Sendable {
-    func fetchAll() async throws -> [Slideshow]
     func fetch(id: UUID) async throws -> Slideshow?
     func save(_ slideshow: Slideshow) async throws
     func delete(id: UUID) async throws

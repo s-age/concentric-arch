@@ -1,15 +1,18 @@
 import Kernel
 import Contract
 
-/// The *driver* for the `Infrastructure.Library` port.
+/// The *driver* for the `Infrastructure.Library` port — the catalog read.
 ///
-/// Holds the concrete store (a SwiftData-backed `any SlideshowStoring`) and binds
-/// it via the `@callable`-generated `Callable.Infrastructure.Library.wire` — one
+/// Layer-prefixed because `Library` now names a device in both the Circuit and
+/// Infrastructure layers (same convention as `Config` / `Slideshow`).
+///
+/// Holds the concrete store (a SwiftData-backed `any LibraryStoring`) and binds it
+/// via the `@callable`-generated `Callable.Infrastructure.Library.wire` — one
 /// `register` per protocol method, so no operation can be left unbound.
-package struct LibraryDriver {
-    private let store: any SlideshowStoring
+package struct InfrastructureLibraryDriver {
+    private let store: any LibraryStoring
 
-    package init(store: any SlideshowStoring) {
+    package init(store: any LibraryStoring) {
         self.store = store
     }
 

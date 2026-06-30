@@ -55,17 +55,17 @@ package struct ContentView: View {
     @State private var library: SlideshowLibraryViewModel
     @State private var error: GlobalErrorViewModel
     @State private var timeTravel: TimeTravelViewModel
-    @State private var selectedSlideshow: SlideshowReturn?
+    @State private var selectedSlideshow: SlideshowSummaryReturn?
     @State private var spritePanel: SpritePanel?
 
-    private let makeSlideshowPlayerViewModel: @MainActor @Sendable (SlideshowReturn) -> SlideshowPlayerViewModel
+    private let makeSlideshowPlayerViewModel: @MainActor @Sendable (SlideshowSummaryReturn) -> SlideshowPlayerViewModel
     private let makeSpritePlayerViewModel: @MainActor @Sendable (SlideshowReturn, Int) -> SlideshowPlayerViewModel
 
     package init(
         library: SlideshowLibraryViewModel,
         error: GlobalErrorViewModel,
         timeTravel: TimeTravelViewModel,
-        makeSlideshowPlayerViewModel: @escaping @MainActor @Sendable (SlideshowReturn) -> SlideshowPlayerViewModel,
+        makeSlideshowPlayerViewModel: @escaping @MainActor @Sendable (SlideshowSummaryReturn) -> SlideshowPlayerViewModel,
         makeSpritePlayerViewModel: @escaping @MainActor @Sendable (SlideshowReturn, Int) -> SlideshowPlayerViewModel
     ) {
         _library = State(initialValue: library)
@@ -81,7 +81,7 @@ package struct ContentView: View {
                 SlideshowPlayerView(
                     viewModel: makeSlideshowPlayerViewModel(slideshow),
                     onBack: { selectedSlideshow = nil },
-                    onSpriteMode: { startIndex in openSpriteMode(slideshow: slideshow, startIndex: startIndex) }
+                    onSpriteMode: { full, startIndex in openSpriteMode(slideshow: full, startIndex: startIndex) }
                 )
                 .navigationTitle(slideshow.name)
             } else {

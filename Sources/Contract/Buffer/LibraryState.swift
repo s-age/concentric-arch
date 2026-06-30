@@ -16,10 +16,10 @@ import Foundation
 /// `Circuit.Slideshow` pipelines. UI-local concerns (the editor selection, error
 /// banners) stay in the view model — Presentation only *reads* this.
 package struct LibraryState: Sendable {
-    package var slideshows: [SlideshowReturn]
+    package var slideshows: [SlideshowSummaryReturn]
     package var isLoading: Bool
 
-    package init(slideshows: [SlideshowReturn] = [], isLoading: Bool = false) {
+    package init(slideshows: [SlideshowSummaryReturn] = [], isLoading: Bool = false) {
         self.slideshows = slideshows
         self.isLoading = isLoading
     }

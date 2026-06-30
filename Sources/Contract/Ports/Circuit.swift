@@ -10,15 +10,27 @@ import Kernel
 /// the composing `register` overload. The conforming types live in the `Circuit`
 /// module and delegate to the saga functions there.
 
-/// The slideshow orchestration surface. Forward-only commands (Void): they publish
-/// into `LibraryState` and Presentation observes it.
+/// The library (catalog) orchestration surface — the list as a whole. Split from
+/// the per-slideshow surface below along the same `library` / `slideshow` axis as
+/// the Infrastructure ports. Forward-only: publishes into `LibraryState`.
+@callable("Circuit.Library")
+package protocol LibraryCircuiting: Sendable {
+    func fetchAll(_ kernel: Kernel, _ payload: FetchSlideshowsPayload) async throws
+}
+
+/// The single-slideshow orchestration surface — one slideshow's lifecycle and its
+/// open detail. Forward-only commands (Void): they publish into `LibraryState`
+/// (the catalog row) and `SlideshowState` (the open detail); Presentation observes.
 @callable("Circuit.Slideshow")
 package protocol SlideshowCircuiting: Sendable {
     func create(_ kernel: Kernel, _ payload: CreateSlideshowPayload) async throws
     func update(_ kernel: Kernel, _ payload: UpdateSlideshowPayload) async throws
     func updateConfig(_ kernel: Kernel, _ payload: UpdateSlideshowConfigPayload) async throws
-    func fetchAll(_ kernel: Kernel, _ payload: FetchSlideshowsPayload) async throws
     func delete(_ kernel: Kernel, _ payload: DeleteSlideshowPayload) async throws
+    /// Load one slideshow's full detail into `SlideshowState` (on demand).
+    func open(_ kernel: Kernel, _ payload: OpenSlideshowPayload) async throws
+    /// Clear `SlideshowState` so no slideshow's slides stay resident.
+    func close(_ kernel: Kernel, _ payload: CloseSlideshowPayload) async throws
 }
 
 /// The config orchestration surface.

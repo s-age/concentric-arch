@@ -24,10 +24,13 @@ package struct SlideshowCompute: SlideshowComputing {
     package func update(_ payload: UpdateSlideshowComputePayload) -> Slideshow {
         var updated = payload.current
         updated.name = payload.name
-        updated.slides = Self.makeSlides(
-            from: payload.localIdentifiers,
-            duration: updated.config.duration.seconds ?? 0
-        )
+        // `nil` is a pure rename — keep the existing slides. A value replaces them.
+        if let identifiers = payload.localIdentifiers {
+            updated.slides = Self.makeSlides(
+                from: identifiers,
+                duration: updated.config.duration.seconds ?? 0
+            )
+        }
         return updated
     }
 

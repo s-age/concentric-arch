@@ -68,6 +68,25 @@ package struct SlideshowReturn: Identifiable, Equatable, Sendable {
     package let createdAt: Date
 }
 
+/// The path-free catalog projection — what `LibraryState` holds for the library
+/// list. The slides (and their file paths) live only in the full `SlideshowReturn`
+/// that `SlideshowState` loads on demand.
+package struct SlideshowSummaryReturn: Identifiable, Equatable, Sendable {
+    package let id: UUID
+    package let name: String
+    package let slideCount: Int
+    package let config: SlideshowConfigReturn
+    package let createdAt: Date
+
+    package init(id: UUID, name: String, slideCount: Int, config: SlideshowConfigReturn, createdAt: Date) {
+        self.id = id
+        self.name = name
+        self.slideCount = slideCount
+        self.config = config
+        self.createdAt = createdAt
+    }
+}
+
 // MARK: - Mapping to/from entities
 
 extension SlideshowReturn {
@@ -78,6 +97,44 @@ extension SlideshowReturn {
             slides: entity.slides.map { SlideReturn(from: $0) },
             config: SlideshowConfigReturn(from: entity.config),
             createdAt: entity.createdAt
+        )
+    }
+}
+
+extension SlideshowSummaryReturn {
+    package init(from entity: SlideshowSummary) {
+        self.init(
+            id: entity.id,
+            name: entity.name,
+            slideCount: entity.slideCount,
+            config: SlideshowConfigReturn(from: entity.config),
+            createdAt: entity.createdAt
+        )
+    }
+
+    /// Re-derive the catalog row from a freshly-saved full slideshow, so a mutation
+    /// pipeline can refresh `LibraryState` (the count, name, config) in place.
+    package init(from slideshow: SlideshowReturn) {
+        self.init(
+            id: slideshow.id,
+            name: slideshow.name,
+            slideCount: slideshow.slides.count,
+            config: slideshow.config,
+            createdAt: slideshow.createdAt
+        )
+    }
+}
+
+extension SlideshowReturn {
+    /// A slides-less shell built from a catalog summary — the seed a player opens
+    /// with before `Circuit.Slideshow.open` loads the full, path-bearing slideshow.
+    package init(shellFrom summary: SlideshowSummaryReturn) {
+        self.init(
+            id: summary.id,
+            name: summary.name,
+            slides: [],
+            config: summary.config,
+            createdAt: summary.createdAt
         )
     }
 }

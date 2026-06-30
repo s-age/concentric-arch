@@ -3,11 +3,11 @@ import Contract
 
 struct SlideshowLibraryPanel: View {
     let viewModel: SlideshowLibraryViewModel
-    let onPlay: (SlideshowReturn) -> Void
-    @State private var slideshowPendingDelete: SlideshowReturn?
+    let onPlay: (SlideshowSummaryReturn) -> Void
+    @State private var slideshowPendingDelete: SlideshowSummaryReturn?
     @FocusState private var focusedName: UUID?
 
-    init(viewModel: SlideshowLibraryViewModel, onPlay: @escaping (SlideshowReturn) -> Void) {
+    init(viewModel: SlideshowLibraryViewModel, onPlay: @escaping (SlideshowSummaryReturn) -> Void) {
         self.viewModel = viewModel
         self.onPlay = onPlay
     }
@@ -82,16 +82,21 @@ struct SlideshowLibraryPanel: View {
 // MARK: - LibraryRow
 
 private struct LibraryRow: View {
-    let slideshow: SlideshowReturn
+    let slideshow: SlideshowSummaryReturn
     var focus: FocusState<UUID?>.Binding
     let onRename: (String) -> Void
     let onPlay: () -> Void
     let onDelete: () -> Void
 
     @State private var name: String
+    /// The last name we committed (or mirrored in from the model). The commit
+    /// baseline — comparing against this rather than `slideshow.name` keeps the
+    /// `onSubmit` (Enter) and focus-loss commits from both firing a rename, since
+    /// the model's name updates only asynchronously after the first dispatch.
+    @State private var committedName: String
 
     init(
-        slideshow: SlideshowReturn,
+        slideshow: SlideshowSummaryReturn,
         focus: FocusState<UUID?>.Binding,
         onRename: @escaping (String) -> Void,
         onPlay: @escaping () -> Void,
@@ -103,6 +108,7 @@ private struct LibraryRow: View {
         self.onPlay = onPlay
         self.onDelete = onDelete
         _name = State(initialValue: slideshow.name)
+        _committedName = State(initialValue: slideshow.name)
     }
 
     var body: some View {
@@ -113,7 +119,7 @@ private struct LibraryRow: View {
                     .fontWeight(.medium)
                     .focused(focus, equals: slideshow.id)
                     .onSubmit(commit)
-                Text("\(slideshow.slides.count) slides · \(slideshow.config.duration.displayLabel)")
+                Text("\(slideshow.slideCount) slides · \(slideshow.config.duration.displayLabel)")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -138,17 +144,24 @@ private struct LibraryRow: View {
         // model — a time-travel restore, or a rename from another surface — would
         // otherwise not show. Mirror it in, but never while the user is editing.
         .onChange(of: slideshow.name) { _, newName in
-            if focus.wrappedValue != slideshow.id { name = newName }
+            if focus.wrappedValue != slideshow.id {
+                name = newName
+                committedName = newName
+            }
         }
     }
 
-    /// Commits a non-empty rename; reverts to the stored name when cleared.
+    /// Commits a non-empty rename; reverts to the stored name when cleared. Compares
+    /// against `committedName` so a single edit fires `onRename` once even though
+    /// both `.onSubmit` and the focus-loss `onChange` call this in quick succession.
     private func commit() {
         let trimmed = name.trimmingCharacters(in: .whitespaces)
         if trimmed.isEmpty {
-            name = slideshow.name
-        } else if trimmed != slideshow.name {
-            onRename(trimmed)
+            name = committedName
+            return
         }
+        guard trimmed != committedName else { return }
+        committedName = trimmed
+        onRename(trimmed)
     }
 }

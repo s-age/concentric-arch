@@ -4,8 +4,22 @@ import Contract
 
 @ModelActor
 actor SlideshowStore {
-    func fetchAll() async throws -> [Slideshow] {
-        try modelContext.fetch(FetchDescriptor<SlideshowModel>()).map { slideshow(from: $0) }
+    func fetchSummaries() async throws -> [SlideshowSummary] {
+        try modelContext.fetch(FetchDescriptor<SlideshowModel>()).map { model in
+            let id = model.id
+            // Count slide rows without fetching them, so no `localIdentifier`
+            // paths are loaded into memory for the catalog.
+            let count = try modelContext.fetchCount(
+                FetchDescriptor<SlideModel>(predicate: #Predicate { $0.slideshow?.id == id })
+            )
+            return SlideshowSummary(
+                id: model.id,
+                name: model.name,
+                slideCount: count,
+                config: config(from: model),
+                createdAt: model.createdAt
+            )
+        }
     }
 
     func fetch(id: UUID) async throws -> Slideshow? {
@@ -63,20 +77,19 @@ actor SlideshowStore {
         }
     }
 
+    private func config(from model: SlideshowModel) -> SlideshowConfig {
+        guard let configModel = model.config else { return .default }
+        return SlideshowConfig(
+            duration: SlideDuration(rawValue: configModel.durationRawValue) ?? .five,
+            transition: TransitionType(rawValue: configModel.transitionRawValue) ?? .default,
+            loop: configModel.loop
+        )
+    }
+
     private func slideshow(from model: SlideshowModel) -> Slideshow {
-        let config: SlideshowConfig
-        if let configModel = model.config {
-            config = SlideshowConfig(
-                duration: SlideDuration(rawValue: configModel.durationRawValue) ?? .five,
-                transition: TransitionType(rawValue: configModel.transitionRawValue) ?? .default,
-                loop: configModel.loop
-            )
-        } else {
-            config = .default
-        }
         let slides = model.slides
             .sorted { $0.order < $1.order }
             .map { Slide(id: $0.id, localIdentifier: $0.localIdentifier, order: $0.order, duration: $0.duration, title: $0.title) }
-        return Slideshow(id: model.id, name: model.name, slides: slides, config: config, createdAt: model.createdAt)
+        return Slideshow(id: model.id, name: model.name, slides: slides, config: config(from: model), createdAt: model.createdAt)
     }
 }
