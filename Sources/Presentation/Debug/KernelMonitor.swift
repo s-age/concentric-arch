@@ -158,10 +158,16 @@ struct KernelMonitorView: View {
         Table(viewModel.forest, children: \.children, selection: $selection) {
             TableColumn("symbol") { (node: TraceTree) in
                 Text(node.entry.symbol).font(.system(.body, design: .monospaced))
+                    .foregroundStyle(rowStyle(node.entry))
             }
-            TableColumn("#") { (node: TraceTree) in Text("\(node.entry.id)").monospacedDigit() }
+            TableColumn("#") { (node: TraceTree) in
+                Text("\(node.entry.id)").monospacedDigit().foregroundStyle(rowStyle(node.entry))
+            }
                 .width(48)
-            TableColumn("time") { (node: TraceTree) in Text(traceTimeFormatter.string(from: node.entry.timestamp)).monospacedDigit() }
+            TableColumn("time") { (node: TraceTree) in
+                Text(traceTimeFormatter.string(from: node.entry.timestamp)).monospacedDigit()
+                    .foregroundStyle(rowStyle(node.entry))
+            }
                 .width(96)
             TableColumn("flow") { (node: TraceTree) in Text(rootTag(node.root)).font(.system(.body, design: .monospaced)).foregroundStyle(.secondary) }
                 .width(64)
@@ -279,12 +285,19 @@ struct KernelMonitorView: View {
         }
     }
 
+    /// Mute a coalesced row (a dropped, redundant dispatch) to grey so it reads as a
+    /// non-event next to the real `next` rows; everything else stays primary.
+    private func rowStyle(_ entry: TraceEntry) -> AnyShapeStyle {
+        entry.verb == .coalesced ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary)
+    }
+
     private func color(for verb: TraceVerb) -> Color {
         switch verb {
         case .next: .secondary
         case .abort: .blue
         case .divert: .orange
         case .fail: .red
+        case .coalesced: .purple
         }
     }
 }

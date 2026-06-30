@@ -42,12 +42,9 @@ struct LibraryPickerView: View {
         }
         // Load the selected slideshow's full, path-bearing detail on demand. Fires
         // on selection change and on re-appear (e.g. back from the player, which
-        // may have left a different slideshow in the shared open slot).
+        // may have left a different slideshow in the shared open slot). Duplicate
+        // `open`s from a selection flicker are coalesced by the kernel.
         .task(id: viewModel.selectedID) { await viewModel.openSelected() }
-        // Once the slot loads or clears, clear the in-flight markers so a later real
-        // re-open / re-close isn't deduped. Observes the raw slot id (not the
-        // selection-guarded `selectedSlideshow`, which can't see the slot clearing).
-        .onChange(of: viewModel.openSlideshowID) { _, _ in viewModel.slotDidSettle() }
     }
 
     private func editor(for slideshow: SlideshowReturn) -> some View {

@@ -240,13 +240,30 @@ package final class Kernel: Sendable {
     /// order; if it fails, the error goes to the sink (the buffer's error state).
     /// For Void commands whose result is published through the buffer; queries
     /// that need a value keep `call`.
-    package func dispatch<P: Sendable, O>(_ symbol: Symbol<P, O>, _ payload: P) {
-        commands.enqueue { [self] in
+    package func dispatch<P: Sendable, O>(_ symbol: Symbol<P, O>, _ payload: P, coalesce: Coalesce = .dropIfPending) {
+        let run: @Sendable () async -> Void = { [self] in
             do {
                 _ = try await call(symbol, payload)
             } catch {
                 await errorSink(error)
             }
+        }
+        switch coalesce {
+        case .repeatable:
+            commands.enqueue(run)
+        case .dropIfPending:
+            // Key on symbol + payload value, so only an *identical* command already
+            // queued/running is dropped; a different payload always runs.
+            let key = "\(symbol.id)\u{1}\(String(describing: payload))"
+            let accepted = commands.enqueue(key: key, run)
+            #if DEBUG
+            if !accepted, Kernel.recordsInspection {
+                // Make the drop visible: record it as its own root entry.
+                let id = symbol.id
+                let repr = Kernel.describePayload(payload)
+                Task { [traceSink] in await traceSink(id, .coalesced, UUID(), nil, repr, Date()) }
+            }
+            #endif
         }
     }
 }

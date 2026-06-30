@@ -178,6 +178,83 @@ func dispatchRoutesFailureToTheErrorSink() async throws {
     #expect(await probe.hits.first?.hasPrefix("err:") == true)
 }
 
+// MARK: - dispatch coalescing
+
+/// Holds a command in-flight: `enter` blocks until `release`, so a duplicate can
+/// be dispatched while the first is still running. `entered` counts how many
+/// commands actually reached the handler.
+private actor Gate {
+    private(set) var entered = 0
+    private var cont: CheckedContinuation<Void, Never>?
+    func enter() async {
+        await withCheckedContinuation { c in
+            entered += 1   // set together with `cont`, before suspending
+            cont = c
+        }
+    }
+    func release() { cont?.resume(); cont = nil }
+}
+
+@Test
+func dispatchDropsIdenticalCommandWhileOneIsInFlight() async throws {
+    let gate = Gate()
+    let block = Symbol<Int, Void>("test.block")
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(block) { _ in await gate.enter() }
+        return builder.build(buffer: BufferBuilder().build())
+    }
+
+    kernel.dispatch(block, 1)                       // runs, blocks in the handler
+    try await until { await gate.entered == 1 }
+    kernel.dispatch(block, 1)                        // identical, in-flight → dropped
+    kernel.dispatch(block, 1)                        // dropped
+    try await Task.sleep(for: .milliseconds(20))     // give the bus a chance to (not) run them
+    #expect(await gate.entered == 1)                 // duplicates were coalesced away
+
+    await gate.release()                             // first completes → key freed
+    try await Task.sleep(for: .milliseconds(20))     // let the completion drain (key removal is async)
+    kernel.dispatch(block, 1)                        // same id again, but nothing in flight → runs
+    try await until { await gate.entered == 2 }
+    await gate.release()
+}
+
+@Test
+func repeatableDispatchIsNeverCoalesced() async throws {
+    let gate = Gate()
+    let block = Symbol<Int, Void>("test.block")
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(block) { _ in await gate.enter() }
+        return builder.build(buffer: BufferBuilder().build())
+    }
+
+    kernel.dispatch(block, 1, coalesce: .repeatable) // runs, blocks
+    try await until { await gate.entered == 1 }
+    kernel.dispatch(block, 1, coalesce: .repeatable) // identical, but opted out → queued
+    await gate.release()                             // first completes → second runs
+    try await until { await gate.entered == 2 }
+    await gate.release()
+}
+
+@Test
+func dispatchDoesNotCoalesceDifferentPayloads() async throws {
+    let gate = Gate()
+    let block = Symbol<Int, Void>("test.block")
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(block) { _ in await gate.enter() }
+        return builder.build(buffer: BufferBuilder().build())
+    }
+
+    kernel.dispatch(block, 1)                        // runs, blocks
+    try await until { await gate.entered == 1 }
+    kernel.dispatch(block, 2)                        // different payload → different key → queued
+    await gate.release()                             // first completes → second runs
+    try await until { await gate.entered == 2 }
+    await gate.release()
+}
+
 // MARK: - trace (DEBUG: every invocation, including pipe internals)
 
 @Test
