@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import SwiftUI
+import Kernel
 
 /// A node-analysis view of the Circuit pipelines — opened from the Debug menu,
 /// separate from the `KernelMonitor`. Where the monitor shows the *runtime* trace,
@@ -10,23 +11,21 @@ import SwiftUI
 /// pipeline's node flow (top-to-bottom) on the right, and a node-inspector below
 /// the canvas. The downward flow keeps reading low-effort — no horizontal scrub.
 ///
-/// First step on purpose: the graph is **hand-authored** in `WiringCatalog` below,
-/// not derived by static introspection. `Pipe` is still an opaque closure array
-/// (`Pipe.swift`), so until `PipeStage` carries a descriptor, the topology cannot be
-/// read back from the real pipelines. This view proves the visualization against a
-/// data model that the eventual L1-derived source can drop straight into — the only
-/// thing that changes later is who fills `WiringCatalog`.
+/// The structure is now **derived by static introspection**, not hand-authored:
+/// App reads each real `Pipe`'s `StageDescriptor`s (`circuitWiringIntrospection()`)
+/// and injects them as `[WiringPipeline]`. Kind/symbol/flowing-type are all read
+/// from the actual pipelines, so the picture cannot drift from the code.
 ///
-/// The model is deliberately the honest subset L1 will be able to see: pipe stages
-/// only. Pre-/post-pipe work that lives outside `kernel.run` (a bare `buffer.mutate`,
-/// a payload `build`) is recorded as a pipeline `note`, not a node, so the picture
-/// never promises more than the future automatic source can deliver.
+/// What is *not* derivable stays out: the non-`.next` branch verbs (`.fail` guards)
+/// live inside opaque closures, and prose descriptions are a separate concern — a
+/// small per-symbol overlay (`symbolDescriptions`) supplies the "what it does" for
+/// named nodes; anonymous map/effect stages name only their kind. Out-of-pipe work
+/// (bare buffer writes, payload builds) arrives as a pipeline `note`.
 
 // MARK: - Model
 
-/// The builder method that minted a stage — its role in the pipe. Mirrors the
-/// `PipeBuilder` surface in `Pipe.swift`; `verb`/`map`/`effect` are anonymous
-/// (no symbol), the rest name the symbol they invoke.
+/// The builder method that minted a stage — its role in the pipe. Mirrors
+/// `Kernel.StageDescriptor.Kind` (and the `PipeBuilder` surface in `Pipe.swift`).
 enum StageKind: String {
     case pipe          // .pipe(symbol)               — invoke, its verb drives the pipe
     case pipeAdapt     // .pipe(symbol) { adapt }      — build the next payload, then invoke
@@ -39,20 +38,30 @@ enum StageKind: String {
 /// One node: a single pipe stage. `symbol` is the dotted id it invokes
 /// (`Layer.Device.method`) or `nil` for an anonymous stage. `flows` is the type
 /// leaving this stage — the label on the outgoing `.next` wire. `branches` lists
-/// the non-`.next` verbs this stage can emit (`.fail`/`.abort`/`.divert`), shown
-/// as badges rather than drawn as edges, since their targets aren't static.
-struct WiringStage {
+/// non-`.next` verbs (not statically derivable, so empty from the introspected
+/// source — kept for a future annotation overlay).
+package struct WiringStage {
     let kind: StageKind
     let symbol: String?
     let flows: String
     let note: String?
     var branches: [String] = []
+
+    /// Map a Kernel `StageDescriptor` (the static shape) into a view node, adding
+    /// the prose `note` from the per-symbol overlay and prettifying the type name.
+    package init(descriptor: StageDescriptor) {
+        self.kind = StageKind(rawValue: descriptor.kind.rawValue) ?? .effect
+        self.symbol = descriptor.symbolID
+        self.flows = prettyType(descriptor.flows)
+        self.note = descriptor.symbolID.flatMap { symbolDescriptions[$0] }
+        self.branches = []
+    }
 }
 
 /// One Circuit file expanded: the dispatch key it backs, the payload that enters
 /// the pipe, and the ordered stages. `note` carries out-of-pipe context (work that
-/// happens around `kernel.run` and so would be invisible to the static source).
-struct WiringPipeline {
+/// happens around `kernel.run` and so is invisible to the static source).
+package struct WiringPipeline {
     let key: String        // the dispatch key the pipe backs, e.g. "Circuit.Slideshow.update"
     let title: String      // the saga function, e.g. "updateSlideshow"
     let input: String      // the type fed into the pipe
@@ -60,101 +69,40 @@ struct WiringPipeline {
     var note: String? = nil
 
     var branchCount: Int { stages.reduce(0) { $0 + $1.branches.count } }
+
+    package init(key: String, title: String, input: String, stages: [WiringStage], note: String?) {
+        self.key = key
+        self.title = title
+        self.input = prettyType(input)
+        self.stages = stages
+        self.note = note
+    }
 }
 
-// MARK: - Hand-authored catalog (the L1-derived source replaces this later)
+/// Prose "what this part does", keyed by symbol id — the seed of descriptions-as-data
+/// (a later step moves this onto the `Symbol`s themselves). Anonymous stages
+/// (map/effect) have no symbol, so they show only their kind.
+private let symbolDescriptions: [String: String] = [
+    "Compute.Slideshow.create":         "build a new slideshow from the request",
+    "Compute.Slideshow.update":         "apply name / photo changes",
+    "Compute.Slideshow.applyConfig":    "apply duration / transition / loop",
+    "Compute.Image.addDroppedFiles":    "resolve dropped files to image ids",
+    "Infrastructure.Slideshow.fetch":   "load the full slideshow by id",
+    "Infrastructure.Slideshow.save":    "persist the slideshow to the store",
+    "Infrastructure.Slideshow.delete":  "delete the slideshow from the store",
+    "Infrastructure.Library.fetchSummaries": "load the path-free catalog summaries",
+    "Infrastructure.Config.save":       "persist the global config",
+]
 
-enum WiringCatalog {
-    static let pipelines: [WiringPipeline] = [
-        WiringPipeline(
-            key: "Circuit.Slideshow.create",
-            title: "createSlideshow",
-            input: "CreateSlideshowPayload",
-            stages: [
-                WiringStage(kind: .pipe, symbol: "Compute.Slideshow.create", flows: "Slideshow", note: "build the new slideshow"),
-                WiringStage(kind: .tap, symbol: "Infrastructure.Slideshow.save", flows: "Slideshow", note: "persist, keep flowing"),
-                WiringStage(kind: .map, symbol: nil, flows: "SlideshowReturn", note: "SlideshowReturn.init"),
-                WiringStage(kind: .effect, symbol: nil, flows: "SlideshowReturn", note: "append catalog row + open detail"),
-            ]
-        ),
-        WiringPipeline(
-            key: "Circuit.Slideshow.update",
-            title: "updateSlideshow",
-            input: "UUID",
-            stages: [
-                WiringStage(kind: .pipe, symbol: "Infrastructure.Slideshow.fetch", flows: "Slideshow?", note: "load current"),
-                WiringStage(kind: .verb, symbol: nil, flows: "Slideshow", note: "require it exists", branches: ["✕ fail: NotFound"]),
-                WiringStage(kind: .pipeAdapt, symbol: "Compute.Slideshow.update", flows: "Slideshow", note: "adapt → UpdateSlideshowComputePayload"),
-                WiringStage(kind: .tap, symbol: "Infrastructure.Slideshow.save", flows: "Slideshow", note: "persist, keep flowing"),
-                WiringStage(kind: .map, symbol: nil, flows: "SlideshowReturn", note: "SlideshowReturn.init"),
-                WiringStage(kind: .effect, symbol: nil, flows: "SlideshowReturn", note: "publishSlideshow"),
-            ],
-            note: "Dispatch payload UpdateSlideshowPayload; only payload.id enters the pipe (the rest is captured by the adapt)."
-        ),
-        WiringPipeline(
-            key: "Circuit.Slideshow.updateConfig",
-            title: "updateSlideshowConfig",
-            input: "UUID",
-            stages: [
-                WiringStage(kind: .pipe, symbol: "Infrastructure.Slideshow.fetch", flows: "Slideshow?", note: "load current"),
-                WiringStage(kind: .verb, symbol: nil, flows: "Slideshow", note: "require it exists", branches: ["✕ fail: NotFound"]),
-                WiringStage(kind: .pipeAdapt, symbol: "Compute.Slideshow.applyConfig", flows: "Slideshow", note: "adapt → ApplyConfigComputePayload"),
-                WiringStage(kind: .tap, symbol: "Infrastructure.Slideshow.save", flows: "Slideshow", note: "persist, keep flowing"),
-                WiringStage(kind: .map, symbol: nil, flows: "SlideshowReturn", note: "SlideshowReturn.init"),
-                WiringStage(kind: .effect, symbol: nil, flows: "SlideshowReturn", note: "publishSlideshow"),
-            ],
-            note: "Dispatch payload UpdateSlideshowConfigPayload; payload.slideshowID enters the pipe."
-        ),
-        WiringPipeline(
-            key: "Circuit.Slideshow.open",
-            title: "openSlideshow",
-            input: "UUID",
-            stages: [
-                WiringStage(kind: .pipe, symbol: "Infrastructure.Slideshow.fetch", flows: "Slideshow?", note: "load detail"),
-                WiringStage(kind: .verb, symbol: nil, flows: "Slideshow", note: "require it exists", branches: ["✕ fail: NotFound"]),
-                WiringStage(kind: .map, symbol: nil, flows: "SlideshowReturn", note: "SlideshowReturn.init"),
-                WiringStage(kind: .effect, symbol: nil, flows: "SlideshowReturn", note: "write SlideshowState"),
-            ]
-        ),
-        WiringPipeline(
-            key: "Circuit.Slideshow.close",
-            title: "closeSlideshow",
-            input: "CloseSlideshowPayload",
-            stages: [
-                WiringStage(kind: .effect, symbol: nil, flows: "—", note: "clear SlideshowState"),
-            ],
-            note: "No pipe: a direct buffer write (no kernel.run). Will be invisible to the L1-derived source — recorded here as a single effect for completeness."
-        ),
-        WiringPipeline(
-            key: "Circuit.Slideshow.delete",
-            title: "deleteSlideshow",
-            input: "UUID",
-            stages: [
-                WiringStage(kind: .pipe, symbol: "Infrastructure.Slideshow.delete", flows: "Void", note: "delete from store"),
-                WiringStage(kind: .effect, symbol: nil, flows: "Void", note: "remove catalog row + drop open detail"),
-            ]
-        ),
-        WiringPipeline(
-            key: "Circuit.Library.fetchAll",
-            title: "fetchSlideshows",
-            input: "Void",
-            stages: [
-                WiringStage(kind: .pipe, symbol: "Infrastructure.Library.fetchSummaries", flows: "[SlideshowSummary]", note: "load catalog summaries"),
-                WiringStage(kind: .map, symbol: nil, flows: "[SlideshowSummaryReturn]", note: "project each summary"),
-                WiringStage(kind: .effect, symbol: nil, flows: "[SlideshowSummaryReturn]", note: "commit LibraryState, isLoading=false"),
-            ],
-            note: "Pre-pipe: sets LibraryState.isLoading=true outside kernel.run (not a stage)."
-        ),
-        WiringPipeline(
-            key: "Circuit.Config.save",
-            title: "saveConfig",
-            input: "SlideshowConfig",
-            stages: [
-                WiringStage(kind: .pipe, symbol: "Infrastructure.Config.save", flows: "Void", note: "persist config"),
-            ],
-            note: "Pre-pipe: builds SlideshowConfig from SaveConfigPayload outside kernel.run (not a stage)."
-        ),
-    ]
+/// `\(T.self)` renders `Optional<X>`/`Array<X>`; show the sugar form instead.
+private func prettyType(_ raw: String) -> String {
+    var s = raw.replacingOccurrences(of: "Swift.", with: "")
+    if s.hasPrefix("Optional<"), s.hasSuffix(">") {
+        s = String(s.dropFirst("Optional<".count).dropLast()) + "?"
+    } else if s.hasPrefix("Array<"), s.hasSuffix(">") {
+        s = "[" + String(s.dropFirst("Array<".count).dropLast()) + "]"
+    }
+    return s == "()" ? "Void" : s
 }
 
 // MARK: - Layer palette
@@ -174,17 +122,26 @@ private func layerColor(_ symbol: String?) -> Color {
 // MARK: - Root view (master-detail)
 
 struct WiringGraphView: View {
-    @State private var selectedKey: String? = WiringCatalog.pipelines.first?.key
+    @State private var selectedKey: String?
     @State private var selectedStage: Int?
     @State private var search = ""
     @State private var mainLineOnly = false
     @State private var collapsed = false
     @State private var zoom: CGFloat = 1
 
+    /// The introspected pipelines, injected by App (composition root) from the real
+    /// Circuit pipes — this view does not depend on Circuit.
+    private let pipelines: [WiringPipeline]
+
+    package init(pipelines: [WiringPipeline]) {
+        self.pipelines = pipelines
+        _selectedKey = State(initialValue: pipelines.first?.key)
+    }
+
     private var filtered: [WiringPipeline] {
-        guard !search.isEmpty else { return WiringCatalog.pipelines }
+        guard !search.isEmpty else { return pipelines }
         let q = search.lowercased()
-        return WiringCatalog.pipelines.filter { p in
+        return pipelines.filter { p in
             p.title.lowercased().contains(q)
                 || p.key.lowercased().contains(q)
                 || p.stages.contains { ($0.symbol ?? "").lowercased().contains(q) }
@@ -192,7 +149,7 @@ struct WiringGraphView: View {
     }
 
     private var selectedPipeline: WiringPipeline? {
-        WiringCatalog.pipelines.first { $0.key == selectedKey }
+        pipelines.first { $0.key == selectedKey }
     }
 
     var body: some View {
@@ -471,20 +428,20 @@ private final class WiringGraphPanel: NSPanel {
 }
 
 /// Opens/closes the wiring graph as a single floating panel. App wires a Debug menu
-/// command to `toggle`. Mirrors `KernelMonitorWindow`; takes no kernel because the
-/// first-step source is static.
+/// command to `toggle`, passing the pipelines it introspected from the real Circuit
+/// pipes (App is the composition root that can see Circuit; this view cannot).
 @MainActor
 package enum WiringGraphWindow {
     private static var panel: NSPanel?
 
-    package static func toggle() {
+    package static func toggle(pipelines: [WiringPipeline]) {
         if let panel {
             panel.close()
             Self.panel = nil
             return
         }
         let panel = WiringGraphPanel()
-        panel.contentView = NSHostingView(rootView: WiringGraphView())
+        panel.contentView = NSHostingView(rootView: WiringGraphView(pipelines: pipelines))
         panel.center()
         panel.orderFront(nil)
         Self.panel = panel
