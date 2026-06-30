@@ -167,6 +167,10 @@ struct ConcentricArchApp: App {
                     KernelMonitorWindow.toggle(kernel: kernel)
                 }
                 .keyboardShortcut("m", modifiers: [.command, .option])
+                Button("Toggle Wiring Graph") {
+                    WiringGraphWindow.toggle()
+                }
+                .keyboardShortcut("w", modifiers: [.command, .option])
             }
             #endif
         }
