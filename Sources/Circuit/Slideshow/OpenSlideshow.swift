@@ -1,3 +1,4 @@
+import struct Foundation.UUID
 import Kernel
 import Contract
 
@@ -6,19 +7,23 @@ import Contract
 /// On-demand detail load: the catalog in `LibraryState` is path-free, so the
 /// editor and player ask for the full, path-bearing slideshow only when one is
 /// actually opened. The result lands in the single `SlideshowState` slot.
+/// The pipeline as a value — split from execution so it can be introspected
+/// without running. Captures `payload.id` in the guard's error.
+package func openSlideshowPipe(_ payload: OpenSlideshowPayload) -> Pipe<UUID, SlideshowReturn> {
+    pipeline(Callable.Infrastructure.Slideshow.fetch)                 // UUID -> Slideshow?
+        .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
+            guard let existing else { return .fail(NotFoundError.slideshow(payload.id)) }
+            return .next(existing)
+        }
+        .map(SlideshowReturn.init(from:))                           // project -> SlideshowReturn
+        .effect { kernel, result in
+            await kernel.buffer.mutate(SlideshowState.self) { $0.slideshow = result }
+        }
+        .seal()
+}
+
 package func openSlideshow(_ kernel: Kernel, _ payload: OpenSlideshowPayload) async throws {
-    try await kernel.run(
-        pipeline(Callable.Infrastructure.Slideshow.fetch)                 // UUID -> Slideshow?
-            .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
-                guard let existing else { return .fail(NotFoundError.slideshow(payload.id)) }
-                return .next(existing)
-            }
-            .map(SlideshowReturn.init(from:))                           // project -> SlideshowReturn
-            .effect { kernel, result in
-                await kernel.buffer.mutate(SlideshowState.self) { $0.slideshow = result }
-            },
-        payload.id
-    )
+    try await kernel.run(openSlideshowPipe(payload), payload.id)
 }
 
 /// Clear the open-slideshow slot, so no slideshow's slides (or their paths) stay

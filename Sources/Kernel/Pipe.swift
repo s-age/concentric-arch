@@ -1,12 +1,51 @@
 import Foundation
 
+// MARK: - Stage descriptor (static shape, for introspection)
+
+/// The static shape of one pipe stage — the part that depends neither on the value
+/// flowing nor on any captured payload. Each `PipeBuilder` method stamps it at
+/// construction, so a built `Pipe` can be read back as a graph (`Pipe.descriptors`)
+/// *without being run*. This is the data the wiring graph renders: the topology is
+/// derived from the real pipelines, not hand-authored.
+///
+/// What is *not* here is what isn't static: the non-`.next` verbs a stage can emit
+/// (`.fail`/`.abort`/`.divert`) live inside opaque closures / bound Drivers, and the
+/// prose "what this part does" is a separate concern (symbol documentation).
+package struct StageDescriptor: Sendable {
+    /// Which builder method minted the stage — its role in the pipe.
+    package enum Kind: String, Sendable {
+        case pipe       // .pipe(symbol)
+        case pipeAdapt  // .pipe(symbol) { adapt }
+        case verb       // .pipe { -> Verb }  — anonymous self-describing stage
+        case tap        // .tap(symbol)
+        case map        // .map(transform)
+        case effect     // .effect { ... }
+    }
+
+    package let kind: Kind
+    /// The dotted symbol id this stage invokes (`Layer.Device.method`), or `nil`
+    /// for an anonymous stage (`verb`/`map`/`effect`).
+    package let symbolID: String?
+    /// Type name of the value leaving this stage — the label on its `.next` wire.
+    package let flows: String
+
+    package init(kind: Kind, symbolID: String?, flows: String) {
+        self.kind = kind
+        self.symbolID = symbolID
+        self.flows = flows
+    }
+}
+
 // MARK: - Erased stage
 
-/// One pipeline step, type-erased for storage. Takes the value currently
-/// flowing (`Any`) and returns an erased `Verb`. The erasure is safe because
-/// construction (`PipeBuilder.pipe`) pins both ends via the `Symbol` /
-/// `Verb<Next>` signatures — the same discipline as `KernelBuilder`'s `as!`.
-typealias PipeStage = @Sendable (Kernel, Any) async throws -> Verb<Any>
+/// One pipeline step: its static `descriptor` plus the type-erased `run` closure.
+/// The erasure is safe because construction (`PipeBuilder.pipe`) pins both ends via
+/// the `Symbol` / `Verb<Next>` signatures — the same discipline as `KernelBuilder`'s
+/// `as!`.
+struct PipeStage {
+    let descriptor: StageDescriptor
+    let run: @Sendable (Kernel, Any) async throws -> Verb<Any>
+}
 
 // MARK: - Pipe
 
@@ -14,12 +53,21 @@ typealias PipeStage = @Sendable (Kernel, Any) async throws -> Verb<Any>
 /// payload you feed in and the result you get back. Built by `PipeBuilder`,
 /// run by `Kernel.compose`.
 ///
-/// `@unchecked Sendable`: the only stored state is an array of `@Sendable`
-/// stage closures (already safe to share); `Input`/`Output` are phantom and
-/// hold no value, so they impose no `Sendable` requirement of their own.
+/// `@unchecked Sendable`: the stored state is an array of stages (each an
+/// `@Sendable` closure plus a `Sendable` descriptor — safe to share) and the
+/// input type name; `Input`/`Output` are phantom and hold no value, so they impose
+/// no `Sendable` requirement of their own.
 package struct Pipe<Input, Output>: @unchecked Sendable {
     let stages: [PipeStage]
-    init(stages: [PipeStage]) { self.stages = stages }
+    /// Type name of the payload that enters the pipe (`Input`).
+    package let inputType: String
+    /// The static shape of the pipe, stage by stage — what the wiring graph reads.
+    package var descriptors: [StageDescriptor] { stages.map(\.descriptor) }
+
+    init(stages: [PipeStage], inputType: String) {
+        self.stages = stages
+        self.inputType = inputType
+    }
 }
 
 // MARK: - Builder
@@ -31,15 +79,24 @@ package struct Pipe<Input, Output>: @unchecked Sendable {
 /// unless the next stage consumes exactly what the current one produces.
 package struct PipeBuilder<Input, Cursor> {
     let stages: [PipeStage]
-    init(stages: [PipeStage]) { self.stages = stages }
+    let inputType: String
+    init(stages: [PipeStage], inputType: String) {
+        self.stages = stages
+        self.inputType = inputType
+    }
+
+    private func appending<Next>(_ stage: PipeStage) -> PipeBuilder<Input, Next> {
+        PipeBuilder<Input, Next>(stages: stages + [stage], inputType: inputType)
+    }
 
     /// Append a leaf `Symbol`. Its bound handler's verb drives the pipe directly:
     /// a plain handler flows through (`.next`), a verb-returning Driver can
     /// `.abort`/`.divert`/`.fail` from here without any wrapper at this layer.
     package func pipe<Next>(_ symbol: Symbol<Cursor, Next>) -> PipeBuilder<Input, Next> {
-        PipeBuilder<Input, Next>(stages: stages + [{ kernel, value in
-            try await kernel.invoke(symbol.id, value as! Cursor)
-        }])
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .pipe, symbolID: symbol.id, flows: "\(Next.self)"),
+            run: { kernel, value in try await kernel.invoke(symbol.id, value as! Cursor) }
+        ))
     }
 
     /// Append a symbol whose payload is *built* from the current value, then flow
@@ -51,9 +108,10 @@ package struct PipeBuilder<Input, Cursor> {
         _ symbol: Symbol<SymbolInput, Next>,
         _ adapt: @escaping @Sendable (Cursor) -> SymbolInput
     ) -> PipeBuilder<Input, Next> {
-        PipeBuilder<Input, Next>(stages: stages + [{ kernel, value in
-            try await kernel.invoke(symbol.id, adapt(value as! Cursor))
-        }])
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .pipeAdapt, symbolID: symbol.id, flows: "\(Next.self)"),
+            run: { kernel, value in try await kernel.invoke(symbol.id, adapt(value as! Cursor)) }
+        ))
     }
 
     /// Append a verb-returning stage — the self-describing rule. It receives the
@@ -62,9 +120,10 @@ package struct PipeBuilder<Input, Cursor> {
     package func pipe<Next>(
         _ stage: @escaping @Sendable (Kernel, Cursor) async throws -> Verb<Next>
     ) -> PipeBuilder<Input, Next> {
-        PipeBuilder<Input, Next>(stages: stages + [{ kernel, value in
-            try await stage(kernel, value as! Cursor).erased()
-        }])
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(Next.self)"),
+            run: { kernel, value in try await stage(kernel, value as! Cursor).erased() }
+        ))
     }
 
     /// Run a side-effecting symbol on the current value and keep that value
@@ -73,35 +132,42 @@ package struct PipeBuilder<Input, Cursor> {
     /// from the Driver stops it). Lets a persist step read like a chain link:
     /// `pipeline(create).tap(save)`.
     package func tap(_ symbol: Symbol<Cursor, Void>) -> PipeBuilder<Input, Cursor> {
-        PipeBuilder<Input, Cursor>(stages: stages + [{ kernel, value in
-            switch try await kernel.invoke(symbol.id, value as! Cursor) {
-            case .next: return .next(value)            // discard Void, forward the original
-            case .abort(let result): return .abort(result)
-            case .divert(let diversion): return .divert(diversion)
-            case .fail(let error): return .fail(error)
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .tap, symbolID: symbol.id, flows: "\(Cursor.self)"),
+            run: { kernel, value in
+                switch try await kernel.invoke(symbol.id, value as! Cursor) {
+                case .next: return .next(value)            // discard Void, forward the original
+                case .abort(let result): return .abort(result)
+                case .divert(let diversion): return .divert(diversion)
+                case .fail(let error): return .fail(error)
+                }
             }
-        }])
+        ))
     }
 
     /// Pure synchronous transform of the flowing value — a projection step with
     /// no I/O and no kernel calls (e.g. `SlideshowReturn.init(from:)`).
     package func map<Next>(_ transform: @escaping @Sendable (Cursor) -> Next) -> PipeBuilder<Input, Next> {
-        PipeBuilder<Input, Next>(stages: stages + [{ _, value in
-            .next(transform(value as! Cursor))
-        }])
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .map, symbolID: nil, flows: "\(Next.self)"),
+            run: { _, value in .next(transform(value as! Cursor)) }
+        ))
     }
 
     /// Effectful passthrough: run an effect on the value (e.g. a buffer write),
     /// then keep the same value flowing.
     package func effect(_ run: @escaping @Sendable (Kernel, Cursor) async throws -> Void) -> PipeBuilder<Input, Cursor> {
-        PipeBuilder<Input, Cursor>(stages: stages + [{ kernel, value in
-            try await run(kernel, value as! Cursor)
-            return .next(value)
-        }])
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .effect, symbolID: nil, flows: "\(Cursor.self)"),
+            run: { kernel, value in
+                try await run(kernel, value as! Cursor)
+                return .next(value)
+            }
+        ))
     }
 
     /// Freeze the builder. `Output` is whatever is flowing now (`Cursor`).
-    package func seal() -> Pipe<Input, Cursor> { Pipe(stages: stages) }
+    package func seal() -> Pipe<Input, Cursor> { Pipe(stages: stages, inputType: inputType) }
 }
 
 // MARK: - Entry points
@@ -109,18 +175,26 @@ package struct PipeBuilder<Input, Cursor> {
 /// Begin a pipeline with a leaf symbol. The pipe's `Input` is the symbol's
 /// payload type; the symbol's bound handler supplies the first verb.
 package func pipeline<P, O>(_ symbol: Symbol<P, O>) -> PipeBuilder<P, O> {
-    PipeBuilder<P, O>(stages: [{ kernel, value in
-        try await kernel.invoke(symbol.id, value as! P)
-    }])
+    PipeBuilder<P, O>(
+        stages: [PipeStage(
+            descriptor: StageDescriptor(kind: .pipe, symbolID: symbol.id, flows: "\(O.self)"),
+            run: { kernel, value in try await kernel.invoke(symbol.id, value as! P) }
+        )],
+        inputType: "\(P.self)"
+    )
 }
 
 /// Begin a pipeline with a verb-returning stage.
 package func pipeline<P, O>(
     _ stage: @escaping @Sendable (Kernel, P) async throws -> Verb<O>
 ) -> PipeBuilder<P, O> {
-    PipeBuilder<P, O>(stages: [{ kernel, value in
-        try await stage(kernel, value as! P).erased()
-    }])
+    PipeBuilder<P, O>(
+        stages: [PipeStage(
+            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(O.self)"),
+            run: { kernel, value in try await stage(kernel, value as! P).erased() }
+        )],
+        inputType: "\(P.self)"
+    )
 }
 
 // MARK: - Running
@@ -133,7 +207,7 @@ extension Kernel {
     package func compose<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws -> O {
         var value: Any = payload
         for stage in pipe.stages {
-            switch try await stage(self, value) {
+            switch try await stage.run(self, value) {
             case .next(let forward):
                 value = forward
             case .abort(let result):
@@ -161,7 +235,7 @@ extension Kernel {
     package func run<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws {
         var value: Any = payload
         for stage in pipe.stages {
-            switch try await stage(self, value) {
+            switch try await stage.run(self, value) {
             case .next(let forward): value = forward
             case .abort: return
             case .divert(let diversion): _ = try await diversion.execute(self); return

@@ -4,6 +4,7 @@ import SwiftData
 import Kernel
 import Contract
 import Infrastructure
+import Circuit
 import Driver
 import Presentation
 
@@ -168,7 +169,18 @@ struct ConcentricArchApp: App {
                 }
                 .keyboardShortcut("m", modifiers: [.command, .option])
                 Button("Toggle Wiring Graph") {
-                    WiringGraphWindow.toggle()
+                    // Introspect the real Circuit pipes here (App is the composition
+                    // root that can see Circuit) and inject the derived shape.
+                    let pipelines = circuitWiringIntrospection().map { intro in
+                        WiringPipeline(
+                            key: intro.key,
+                            title: intro.title,
+                            input: intro.inputType,
+                            stages: intro.stages.map(WiringStage.init(descriptor:)),
+                            note: intro.note
+                        )
+                    }
+                    WiringGraphWindow.toggle(pipelines: pipelines)
                 }
                 .keyboardShortcut("w", modifiers: [.command, .option])
             }

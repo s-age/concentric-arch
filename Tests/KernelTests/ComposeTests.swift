@@ -472,3 +472,31 @@ func abortWithWrongTypeThrowsTypeMismatch() async throws {
         _ = try await kernel.compose(pipe, 0)
     }
 }
+
+// MARK: - Static shape (L1 descriptors)
+
+@Test
+func builtPipeExposesItsStaticShapeWithoutRunning() {
+    // No kernel, no execution — building the pipe records each stage's descriptor,
+    // so the wiring graph can read the topology back without running anything.
+    let pipe = pipeline(increment)        // .pipe(symbol)  Int -> Int
+        .pipe(stringify)                  // .pipe(symbol)  Int -> String
+        .map { $0.count }                 // .map           String -> Int
+        .seal()
+
+    #expect(pipe.inputType == "Int")
+    #expect(pipe.descriptors.map(\.kind) == [.pipe, .pipe, .map])
+    #expect(pipe.descriptors.map(\.symbolID) == ["test.increment", "test.stringify", nil])
+    #expect(pipe.descriptors.map(\.flows) == ["Int", "String", "Int"])
+}
+
+@Test
+func tapAndVerbStagesAreLabelledInTheDescriptor() {
+    let pipe = pipeline(increment)        // .pipe(symbol)  Int -> Int
+        .tap(erase)                       // .tap(symbol)   side-effect, Int flows through
+        .pipe { (_, n: Int) -> Verb<Int> in .next(n) } // .pipe { -> Verb } anonymous
+        .seal()
+
+    #expect(pipe.descriptors.map(\.kind) == [.pipe, .tap, .verb])
+    #expect(pipe.descriptors.map(\.symbolID) == ["test.increment", "test.erase", nil])
+}
