@@ -2,7 +2,11 @@ import Foundation
 import SwiftData
 import Contract
 
-// MARK: - Package seam
+// MARK: - Infrastructure catalog
+//
+// The representative file of the Infrastructure module: the concrete stores'
+// conformances + the factories that build them — the self-descriptive index of
+// what this storage layer exposes.
 //
 // SwiftData's `@Model` / `@ModelActor` macros synthesise `internal` witnesses
 // (`id`, `modelContainer`, `modelExecutor`), so the model classes and the

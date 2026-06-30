@@ -1,10 +1,11 @@
 import Kernel
 import Contract
 
-/// Concrete Circuit devices: thin conformers that present the saga functions as
-/// the `@callable`-generated operation surface. The orchestration bodies stay in
-/// the per-pipeline files (`Slideshow/…`, `Config/…`); these types just expose
-/// them as `SlideshowCircuiting` / `ConfigCircuiting` so the macro can wire them.
+/// The Circuit module's catalog — the single self-descriptive index of what this
+/// orchestration layer does. The conforming devices present its surface as
+/// `SlideshowCircuiting` / `ConfigCircuiting` (so the `@callable`-generated wiring
+/// can bind them); each operation delegates to its saga in the per-pipeline files
+/// (`Slideshow/…`, `Config/…`). Open this file to see every Circuit operation.
 package struct SlideshowCircuit: SlideshowCircuiting {
     package init() {}
     package func create(_ kernel: Kernel, _ payload: CreateSlideshowPayload) async throws { try await createSlideshow(kernel, payload) }
