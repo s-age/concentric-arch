@@ -121,12 +121,14 @@ package struct PipeBuilder<Input, Cursor> {
 
     /// Append a verb-returning stage — the self-describing rule. It receives the
     /// kernel (to make its own calls) and the flowing value, and decides
-    /// `.next`/`.abort`/`.divert`/`.fail`.
+    /// `.next`/`.abort`/`.divert`/`.fail`. Anonymous (no symbol), so it carries no
+    /// description of its own — pass `note:` to label what this guard/rule does.
     package func pipe<Next>(
+        note: String? = nil,
         _ stage: @escaping @Sendable (Kernel, Cursor) async throws -> Verb<Next>
     ) -> PipeBuilder<Input, Next> {
         appending(PipeStage(
-            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(Next.self)"),
+            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(Next.self)", description: note),
             run: { kernel, value in try await stage(kernel, value as! Cursor).erased() }
         ))
     }
@@ -136,9 +138,9 @@ package struct PipeBuilder<Input, Cursor> {
     /// the cursor is unchanged, but its verb still governs the pipe (a `.fail`
     /// from the Driver stops it). Lets a persist step read like a chain link:
     /// `pipeline(create).tap(save)`.
-    package func tap(_ symbol: Symbol<Cursor, Void>) -> PipeBuilder<Input, Cursor> {
+    package func tap(_ symbol: Symbol<Cursor, Void>, note: String? = nil) -> PipeBuilder<Input, Cursor> {
         appending(PipeStage(
-            descriptor: StageDescriptor(kind: .tap, symbolID: symbol.id, flows: "\(Cursor.self)", description: symbol.description),
+            descriptor: StageDescriptor(kind: .tap, symbolID: symbol.id, flows: "\(Cursor.self)", description: note ?? symbol.description),
             run: { kernel, value in
                 switch try await kernel.invoke(symbol.id, value as! Cursor) {
                 case .next: return .next(value)            // discard Void, forward the original
@@ -151,19 +153,20 @@ package struct PipeBuilder<Input, Cursor> {
     }
 
     /// Pure synchronous transform of the flowing value — a projection step with
-    /// no I/O and no kernel calls (e.g. `SlideshowReturn.init(from:)`).
-    package func map<Next>(_ transform: @escaping @Sendable (Cursor) -> Next) -> PipeBuilder<Input, Next> {
+    /// no I/O and no kernel calls (e.g. `SlideshowReturn.init(from:)`). Anonymous;
+    /// pass `note:` to label the projection.
+    package func map<Next>(note: String? = nil, _ transform: @escaping @Sendable (Cursor) -> Next) -> PipeBuilder<Input, Next> {
         appending(PipeStage(
-            descriptor: StageDescriptor(kind: .map, symbolID: nil, flows: "\(Next.self)"),
+            descriptor: StageDescriptor(kind: .map, symbolID: nil, flows: "\(Next.self)", description: note),
             run: { _, value in .next(transform(value as! Cursor)) }
         ))
     }
 
     /// Effectful passthrough: run an effect on the value (e.g. a buffer write),
-    /// then keep the same value flowing.
-    package func effect(_ run: @escaping @Sendable (Kernel, Cursor) async throws -> Void) -> PipeBuilder<Input, Cursor> {
+    /// then keep the same value flowing. Anonymous; pass `note:` to label the effect.
+    package func effect(note: String? = nil, _ run: @escaping @Sendable (Kernel, Cursor) async throws -> Void) -> PipeBuilder<Input, Cursor> {
         appending(PipeStage(
-            descriptor: StageDescriptor(kind: .effect, symbolID: nil, flows: "\(Cursor.self)"),
+            descriptor: StageDescriptor(kind: .effect, symbolID: nil, flows: "\(Cursor.self)", description: note),
             run: { kernel, value in
                 try await run(kernel, value as! Cursor)
                 return .next(value)
@@ -189,13 +192,14 @@ package func pipeline<P, O>(_ symbol: Symbol<P, O>) -> PipeBuilder<P, O> {
     )
 }
 
-/// Begin a pipeline with a verb-returning stage.
+/// Begin a pipeline with a verb-returning stage. Anonymous; pass `note:` to label it.
 package func pipeline<P, O>(
+    note: String? = nil,
     _ stage: @escaping @Sendable (Kernel, P) async throws -> Verb<O>
 ) -> PipeBuilder<P, O> {
     PipeBuilder<P, O>(
         stages: [PipeStage(
-            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(O.self)"),
+            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(O.self)", description: note),
             run: { kernel, value in try await stage(kernel, value as! P).erased() }
         )],
         inputType: "\(P.self)"

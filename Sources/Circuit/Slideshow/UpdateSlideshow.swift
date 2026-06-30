@@ -9,7 +9,7 @@ import Contract
 /// payload and reads only the static shape.
 package func updateSlideshowPipe(_ payload: UpdateSlideshowPayload) -> Pipe<UUID, SlideshowReturn> {
     pipeline(Callable.Infrastructure.Slideshow.fetch)                        // UUID -> Slideshow?
-        .pipe { _, existing -> Verb<Slideshow> in                   // require it exists, else stop
+        .pipe(note: "require it exists, else fail") { _, existing -> Verb<Slideshow> in
             guard let existing else { return .fail(NotFoundError.slideshow(payload.id)) }
             return .next(existing)
         }
@@ -21,8 +21,8 @@ package func updateSlideshowPipe(_ payload: UpdateSlideshowPayload) -> Pipe<UUID
             )
         }
         .tap(Callable.Infrastructure.Slideshow.save)                         // persist, keep the Slideshow flowing
-        .map(SlideshowReturn.init(from:))                            // project -> SlideshowReturn
-        .effect { kernel, result in                                 // publish to catalog + open detail
+        .map(note: "project → SlideshowReturn", SlideshowReturn.init(from:))
+        .effect(note: "publish to catalog + open detail") { kernel, result in
             await publishSlideshow(kernel, result)
         }
         .seal()

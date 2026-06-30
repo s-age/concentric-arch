@@ -244,7 +244,7 @@ struct WiringGraphView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         RoundedRectangle(cornerRadius: 3).fill(layerColor(stage.symbol)).frame(width: 11, height: 11)
-                        Text(stage.symbol ?? "anonymous").font(.system(.headline, design: .monospaced))
+                        Text(stage.symbol ?? stage.note ?? "anonymous").font(.system(.headline, design: .monospaced))
                         Text(stage.kind.rawValue)
                             .font(.system(.caption, design: .monospaced))
                             .padding(.horizontal, 6).padding(.vertical, 2)
@@ -362,12 +362,23 @@ private struct StageNodeView: View {
             Text(stage.kind.rawValue)
                 .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .foregroundStyle(layerColor(stage.symbol))
-            Text(stage.symbol ?? "anonymous")
-                .font(.system(.title3, design: .monospaced))
-                .foregroundStyle(isAnonymous ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.primary))
-            if !mainLineOnly, let note = stage.note {
-                Text(note).font(.callout).foregroundStyle(.secondary)
+            if let symbol = stage.symbol {
+                Text(symbol)
+                    .font(.system(.title3, design: .monospaced))
+                    .foregroundStyle(.primary)
+                if !mainLineOnly, let note = stage.note {
+                    Text(note).font(.callout).foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            } else if let note = stage.note, !mainLineOnly {
+                // Anonymous: its label is the node's identity — show it as the headline.
+                Text(note).font(.callout).foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
+            } else {
+                // Unlabelled (or main-line-only): fall back to the kind, never a bare "anonymous".
+                Text(stage.kind.rawValue)
+                    .font(.system(.title3, design: .monospaced))
+                    .foregroundStyle(.tertiary)
             }
             if !mainLineOnly {
                 ForEach(stage.branches, id: \.self) { branch in
@@ -384,7 +395,7 @@ private struct StageNodeView: View {
             Text(stage.kind.rawValue)
                 .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .foregroundStyle(.gray)
-            Text(stage.note ?? "anonymous").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(stage.note ?? stage.kind.rawValue).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, 14).padding(.vertical, 9)

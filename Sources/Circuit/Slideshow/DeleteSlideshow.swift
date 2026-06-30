@@ -7,7 +7,7 @@ import Contract
 /// without running. Captures `payload.id` in the buffer-removal effect.
 package func deleteSlideshowPipe(_ payload: DeleteSlideshowPayload) -> Pipe<UUID, Void> {
     pipeline(Callable.Infrastructure.Slideshow.delete)           // UUID -> Void
-        .effect { kernel, _ in                          // remove from the buffer
+        .effect(note: "remove catalog row + drop open detail") { kernel, _ in
             await kernel.buffer.mutate(LibraryState.self) { state in
                 state.slideshows.removeAll { $0.id == payload.id }
             }

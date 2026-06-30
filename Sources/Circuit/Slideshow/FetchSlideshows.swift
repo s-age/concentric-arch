@@ -10,8 +10,8 @@ import Contract
 /// without running. No payload capture (input is `Void`).
 package func fetchSlideshowsPipe() -> Pipe<Void, [SlideshowSummaryReturn]> {
     pipeline(Callable.Infrastructure.Library.fetchSummaries)       // Void -> [SlideshowSummary]
-        .map { $0.map(SlideshowSummaryReturn.init(from:)) }  // -> [SlideshowSummaryReturn]
-        .effect { kernel, returns in
+        .map(note: "project each summary → SlideshowSummaryReturn") { $0.map(SlideshowSummaryReturn.init(from:)) }
+        .effect(note: "commit catalog to LibraryState, isLoading=false") { kernel, returns in
             // Authoritative full reload. This is the one writer NOT safe against
             // a mutation that lands during `fetchSummaries` above (a create during cold
             // load is lost; a delete during a warm reload is resurrected): the
