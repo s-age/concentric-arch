@@ -14,6 +14,6 @@ package struct ImageComputeDriver {
     }
 
     package func wire(into builder: KernelBuilder) {
-        ImageComputingCallable.wire(device, into: builder)
+        Callable.Compute.Image.wire(device, into: builder)
     }
 }

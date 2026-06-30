@@ -8,5 +8,5 @@ package func saveConfig(_ kernel: Kernel, _ payload: SaveConfigPayload) async th
         transition: payload.transition.toEntity,
         loop: payload.loop
     )
-    try await kernel.run(pipeline(ConfigStoringCallable.save), config) // SlideshowConfig -> Void (forward-only)
+    try await kernel.run(pipeline(Callable.Infrastructure.Config.save), config) // SlideshowConfig -> Void (forward-only)
 }

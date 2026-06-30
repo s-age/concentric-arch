@@ -2,7 +2,7 @@ import Kernel
 import Contract
 
 /// The *driver* for the `Infrastructure.Config` port — binds the config store
-/// (`any ConfigStoring`) via the `@callable`-generated `ConfigStoringCallable.wire`.
+/// (`any ConfigStoring`) via the `@callable`-generated `Callable.Infrastructure.Config.wire`.
 ///
 /// Layer-prefixed because the `Config` port exists in both layers
 /// (`Infrastructure.Config` and `Circuit.Config`); their drivers would otherwise
@@ -15,6 +15,6 @@ package struct InfrastructureConfigDriver {
     }
 
     package func wire(into builder: KernelBuilder) {
-        ConfigStoringCallable.wire(store, into: builder)
+        Callable.Infrastructure.Config.wire(store, into: builder)
     }
 }

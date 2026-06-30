@@ -23,6 +23,6 @@ package struct SlideshowComputeDriver {
     package func wire(into builder: KernelBuilder) {
         // The wiring is generated from `SlideshowComputing`'s requirements by
         // `@callable` — one `register` per method, none can be forgotten.
-        SlideshowComputingCallable.wire(device, into: builder)
+        Callable.Compute.Slideshow.wire(device, into: builder)
     }
 }
