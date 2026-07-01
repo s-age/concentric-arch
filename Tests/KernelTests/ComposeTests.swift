@@ -370,6 +370,36 @@ func traceStateRingTrimsToCapAndKeepsSequence() {
     #expect(state.entries.map(\.id) == [7, 8, 9])              // monotonic seq survives trim
 }
 
+@Test
+func traceStateTrimsInBatchesKeepingTheWindowWithinTheOvershoot() {
+    var state = TraceState()
+    let epoch = Date(timeIntervalSince1970: 0)
+    let cap = 100
+    var maxCount = 0
+    for n in 0..<1000 {
+        state.record(symbol: "s\(n)", verb: .next, span: UUID(), parent: nil, payload: nil, at: epoch, cap: cap)
+        maxCount = max(maxCount, state.entries.count)
+    }
+    #expect(maxCount <= cap + cap / 4)   // never overshoots past cap × 1.25
+    #expect(state.entries.count >= cap)  // a trim never cuts below cap
+    #expect(state.entries.map(\.id) == Array((1000 - state.entries.count)..<1000)) // contiguous newest suffix
+}
+
+@Test
+func bufferHistoryRingTrimsInBatchesKeepingTheWindowWithinTheOvershoot() {
+    var state = BufferHistoryState()
+    let epoch = Date(timeIntervalSince1970: 0)
+    let cap = 100
+    var maxCount = 0
+    for _ in 0..<1000 {
+        state.record(root: UUID(), stores: [], image: [:], at: epoch, cap: cap)
+        maxCount = max(maxCount, state.snapshots.count)
+    }
+    #expect(maxCount <= cap + cap / 4)     // mirrors TraceState's batch trim
+    #expect(state.snapshots.count >= cap)
+    #expect(state.snapshots.map(\.id) == Array((1000 - state.snapshots.count)..<1000)) // contiguous newest suffix
+}
+
 // MARK: - forest (flat trace → call trees for the monitor)
 
 @Test
