@@ -145,10 +145,12 @@ swift test                  # tests for the Kernel's compose pipeline
 
 ## Distribution policy — source package only
 
-The `Kernel` is headed for extraction as a standalone framework, and its v1 is
-distributed as a **SwiftPM source package** — never as a prebuilt binary
-(`.xcframework` / `binaryTarget`). This is a design constraint, not a packaging
-preference.
+This repository itself is not distributed — it stays the reference app. The
+`Kernel` is headed for extraction as a standalone framework in its own
+repository, and this section is that package's distribution policy, recorded
+here where the design lives: v1 ships as a **SwiftPM source package** — never
+as a prebuilt binary (`.xcframework` / `binaryTarget`). This is a design
+constraint, not a packaging preference.
 
 The dev tooling (trace, payload inspection, buffer history, time-travel) is
 fenced with `#if DEBUG` at the edges of its extension files. As source, those
