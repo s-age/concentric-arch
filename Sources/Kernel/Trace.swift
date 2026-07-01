@@ -38,8 +38,9 @@ package struct TraceEntry: Sendable, Identifiable {
 }
 
 /// Bounded ring of recent invocations, held in `kernel.buffer` so the monitor
-/// observes it like any other state. `record` appends and trims to `cap`,
-/// dropping the oldest — the trace is a window, not a transcript.
+/// observes it like any other state. `record` appends and drops the oldest in
+/// batches, keeping the window within [`cap`, `cap` × 1.25] — the trace is a
+/// window, not a transcript, so exact-`cap` precision buys nothing.
 package struct TraceState: Sendable {
     package private(set) var entries: [TraceEntry] = []
     private var nextID = 0
@@ -49,7 +50,11 @@ package struct TraceState: Sendable {
     package mutating func record(symbol: String, verb: TraceVerb, span: UUID, parent: UUID?, payload: String?, at timestamp: Date, cap: Int) {
         entries.append(TraceEntry(id: nextID, symbol: symbol, verb: verb, span: span, parent: parent, payload: payload, timestamp: timestamp))
         nextID += 1
-        if entries.count > cap { entries.removeFirst(entries.count - cap) }
+        // removeFirst shifts the whole array (O(cap)); paying that per record once
+        // the window fills would make every traced invoke O(cap). Overshoot up to
+        // 25% and trim the excess in one shot instead.
+        let overflow = entries.count - cap
+        if overflow > cap / 4 { entries.removeFirst(overflow) }
     }
 
     package mutating func clear() {

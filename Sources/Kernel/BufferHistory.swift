@@ -46,7 +46,8 @@ package struct BufferSnapshot: Identifiable {
 
 /// Bounded ring of recent command-boundary snapshots, held in `kernel.buffer` so
 /// the monitor observes it like any other state. Mirrors `TraceState`: `record`
-/// appends and trims to `cap`, dropping the oldest — a window, not a transcript.
+/// appends and drops the oldest in batches, keeping the window within
+/// [`cap`, `cap` × 1.25] — a window, not a transcript.
 ///
 /// The trace gives the *control* history at invoke granularity; this gives the
 /// *state* history at command granularity. They join at the flow root.
@@ -59,7 +60,10 @@ package struct BufferHistoryState {
     package mutating func record(root: UUID, stores: [StoreDump], image: BufferImage, at timestamp: Date, cap: Int) {
         snapshots.append(BufferSnapshot(id: nextID, root: root, stores: stores, image: image, timestamp: timestamp))
         nextID += 1
-        if snapshots.count > cap { snapshots.removeFirst(snapshots.count - cap) }
+        // Same batch trim as TraceState.record: removeFirst is O(cap), so trim
+        // only once the overshoot exceeds 25% of cap rather than per record.
+        let overflow = snapshots.count - cap
+        if overflow > cap / 4 { snapshots.removeFirst(overflow) }
     }
 
     /// The latest snapshot taken for a given flow root, or `nil` if the command
