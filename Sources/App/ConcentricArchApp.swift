@@ -74,11 +74,11 @@ struct ConcentricArchApp: App {
             bufferBuilder.allocate(TimeTravelState())
             #endif
 
-            // Wire the drivers into the kernel so that a call/dispatch for a
-            // Library symbol routes through InfrastructureLibraryDriver to the store.
+            // Bind every device onto the bus via the Driver gateway, so a
+            // call/dispatch for a symbol routes to its concrete handler. The stores
+            // (runtime SwiftData deps) are passed in; pure Compute/Circuit devices
+            // default inside the gateway (swappable by parameter).
             let builder = KernelBuilder()
-            // One shared wiring list (in Driver), used here and by the wiring
-            // smoke test — so a forgotten driver can't slip through App-side only.
             wireAllDrivers(
                 into: builder,
                 slideshowStore: makeSlideshowStore(modelContainer),

@@ -2,7 +2,8 @@ import Foundation
 import Contract
 
 /// Pure business logic for building and transforming slideshows. No I/O, no kernel
-/// calls — a leaf computation. Wired into the kernel by `SlideshowComputeDriver`.
+/// calls — a leaf computation. Bound onto the bus by `wireAllDrivers` (the Driver
+/// gateway) via the `@callable`-generated `Callable.Compute.Slideshow.wire`.
 package struct SlideshowCompute: SlideshowComputing {
     package init() {}
 
