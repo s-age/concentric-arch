@@ -46,6 +46,9 @@ package struct WiringStage {
     let flows: String
     let note: String?
     var branches: [String] = []
+    /// Where this stage is wired in source (precise, from the builder). For an
+    /// anonymous stage this is where its closure — the implementation — lives.
+    let wireSite: SourceLocation?
 
     /// Map a Kernel `StageDescriptor` (the static shape) into a view node. The
     /// prose `note` is the symbol's own `description` — lifted by the `@callable`
@@ -57,6 +60,7 @@ package struct WiringStage {
         self.flows = prettyType(descriptor.flows)
         self.note = descriptor.description
         self.branches = []
+        self.wireSite = descriptor.wireSite
     }
 }
 
@@ -103,6 +107,71 @@ private func layerColor(_ symbol: String?) -> Color {
     case "Compute":        return .green
     case "Infrastructure": return .blue
     default:               return .gray
+    }
+}
+
+// MARK: - Source navigation
+//
+// Opening the code behind a node is this architecture's missing piece: symbol-keyed
+// dispatch means Xcode's jump-to-definition dead-ends at the port protocol, never the
+// concrete handler. Two targets per node:
+//   • wire-site  — precise (file:line, captured by the builder). For an anonymous
+//                  stage this IS its implementation (the closure). Non-rotting.
+//   • impl       — the concrete leaf handler, resolved by CONVENTION from the symbol
+//                  id (best-effort — may drift if files move). This same table is the
+//                  seed of generating Drivers from convention instead of hand-writing.
+
+/// Symbol id (`Layer.Device.method`) → the concrete implementation file, relative to
+/// the repo root. Best-effort convention; a miss just falls back to the wire-site.
+private func implRelativePath(forSymbol id: String) -> String? {
+    let device = id.split(separator: ".").prefix(2).joined(separator: ".")
+    switch device {
+    case "Compute.Slideshow":       return "Sources/Compute/SlideshowCompute.swift"
+    case "Compute.Image":           return "Sources/Compute/ImageCompute.swift"
+    case "Infrastructure.Slideshow",
+         "Infrastructure.Library":  return "Sources/Infrastructure/Slideshow/Slideshow.swift"
+    case "Infrastructure.Config":   return "Sources/Infrastructure/Config/ConfigStore.swift"
+    default:                        return nil
+    }
+}
+
+/// Derive the repo root from any absolute source path under `<root>/Sources/…`
+/// (every wire-site is such a path), so convention-relative impl paths can anchor.
+private func repoRoot(from absolutePath: String) -> String? {
+    guard let r = absolutePath.range(of: "/Sources/") else { return nil }
+    return String(absolutePath[absolutePath.startIndex..<r.lowerBound])
+}
+
+/// The concrete-impl location for a symbol node (convention), anchored to the repo
+/// root taken from the node's own wire-site. `nil` for anonymous nodes or a miss.
+private func implLocation(for stage: WiringStage) -> SourceLocation? {
+    guard let symbol = stage.symbol,
+          let rel = implRelativePath(forSymbol: symbol),
+          let site = stage.wireSite,
+          let root = repoRoot(from: site.file)
+    else { return nil }
+    return SourceLocation(file: "\(root)/\(rel)", line: 1)
+}
+
+private func fileName(_ path: String) -> String {
+    URL(fileURLWithPath: path).lastPathComponent
+}
+
+/// Open a source location in the system editor for `.swift`. If that editor is
+/// Xcode, jump to the line via `xed`; otherwise open the file (line-level jump is
+/// editor-specific). This is the icon's action — the way out of the GUI into code.
+@MainActor
+private func openInEditor(_ loc: SourceLocation) {
+    let url = URL(fileURLWithPath: loc.file)
+    if loc.line > 1,
+       let app = NSWorkspace.shared.urlForApplication(toOpen: url),
+       Bundle(url: app)?.bundleIdentifier == "com.apple.dt.Xcode" {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/xed")
+        process.arguments = ["--line", "\(loc.line)", loc.file]
+        do { try process.run() } catch { NSWorkspace.shared.open(url) }
+    } else {
+        NSWorkspace.shared.open(url)
     }
 }
 
@@ -192,6 +261,11 @@ struct WiringGraphView: View {
                 Text(pipeline.title).font(.system(.headline, design: .monospaced))
                 Text(pipeline.key).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             }
+            if let site = pipeline.stages.first?.wireSite {
+                Button { openInEditor(site) } label: { Image(systemName: "arrow.up.forward.square") }
+                    .buttonStyle(.borderless)
+                    .help("Open the saga (\(fileName(site.file))) in the editor")
+            }
             Spacer()
             Toggle("main line only", isOn: $mainLineOnly)
                 .toggleStyle(.switch).controlSize(.small)
@@ -253,9 +327,13 @@ struct WiringGraphView: View {
                     detailRow("payload", "\(input)  →  \(stage.flows)")
                     detailRow("emits", ([".next"] + stage.branches).joined(separator: "     "))
                     if let note = stage.note { detailRow("description", note) }
-                    detailRow("implementation", stage.symbol == nil
-                        ? "inline closure (no symbol)"
-                        : "resolves once L1-derived — \(stage.symbol!)")
+                    if let impl = implLocation(for: stage) {
+                        openRow("implementation", "\(fileName(impl.file))  (convention)", impl)
+                    }
+                    if let site = stage.wireSite {
+                        openRow(stage.symbol == nil ? "closure" : "wire-site",
+                                "\(fileName(site.file)):\(site.line)", site)
+                    }
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -274,6 +352,23 @@ struct WiringGraphView: View {
                 .frame(width: 96, alignment: .trailing)
             Text(value).font(.system(.callout, design: .monospaced)).textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// A detail row whose value is a clickable link that opens the location in the
+    /// system's `.swift` editor.
+    private func openRow(_ label: String, _ value: String, _ loc: SourceLocation) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Text(label).font(.caption).foregroundStyle(.secondary)
+                .frame(width: 96, alignment: .trailing)
+            Button { openInEditor(loc) } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.up.forward.square")
+                    Text(value).font(.system(.callout, design: .monospaced))
+                }
+            }
+            .buttonStyle(.link)
+            Spacer()
         }
     }
 }
@@ -344,6 +439,10 @@ private struct StageNodeView: View {
         collapsed && isAnonymous && (stage.kind == .map || stage.kind == .effect)
     }
 
+    /// The node's primary "open" target: the concrete impl for a symbol node, else
+    /// the wire-site (which, for an anonymous stage, is its closure).
+    private var primaryTarget: SourceLocation? { implLocation(for: stage) ?? stage.wireSite }
+
     var body: some View {
         Group {
             if isCompact { compactBody } else { fullBody }
@@ -359,9 +458,21 @@ private struct StageNodeView: View {
 
     private var fullBody: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(stage.kind.rawValue)
-                .font(.system(.caption, design: .monospaced).weight(.semibold))
-                .foregroundStyle(layerColor(stage.symbol))
+            HStack(alignment: .firstTextBaseline) {
+                Text(stage.kind.rawValue)
+                    .font(.system(.caption, design: .monospaced).weight(.semibold))
+                    .foregroundStyle(layerColor(stage.symbol))
+                Spacer()
+                if let target = primaryTarget {
+                    Button { openInEditor(target) } label: {
+                        Image(systemName: "arrow.up.forward.square")
+                    }
+                    .buttonStyle(.borderless)
+                    .help(stage.symbol == nil
+                          ? "Open this stage's closure in the editor"
+                          : "Open the implementation in the editor (convention)")
+                }
+            }
             if let symbol = stage.symbol {
                 Text(symbol)
                     .font(.system(.title3, design: .monospaced))
