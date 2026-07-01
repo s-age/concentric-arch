@@ -143,6 +143,36 @@ swift test                  # tests for the Kernel's compose pipeline
 ./Scripts/build.sh          # bundle into concentric-arch.app for distribution
 ```
 
+## Distribution policy — source package only
+
+This repository itself is not distributed — it stays the reference app. The
+`Kernel` is headed for extraction as a standalone framework in its own
+repository, and this section is that package's distribution policy, recorded
+here where the design lives: v1 ships as a **SwiftPM source package** — never
+as a prebuilt binary (`.xcframework` / `binaryTarget`). This is a design
+constraint, not a packaging preference.
+
+The dev tooling (trace, payload inspection, buffer history, time-travel) is
+fenced with `#if DEBUG` at the edges of its extension files. As source, those
+fences are evaluated under **the consuming app's** build configuration: your
+Debug build gets the full monitor, and your Release build pays nothing beyond a
+no-op sink. A binary would freeze the fences at the *framework's* build time
+instead — a Release-built binary drops `previewTimeTravel` / `exitTimeTravel`
+and `Kernel.recordsInspection` outright (link errors for any Debug consumer
+code that references them), and the `traced` hook collapses to a passthrough,
+so the trace/snapshot sinks never fire and the monitor goes **silently empty**.
+
+If binary distribution ever becomes worth it, the fences would have to move to
+SwiftPM traits, a custom build setting, or a runtime flag — trading away the
+zero-cost guarantee of the `@inline(__always)` release passthrough. Until that
+trade is forced, source-only is the policy.
+
+One deliberate asymmetry: the monitor's *state types* (`TraceState`,
+`BufferHistoryState`, `TimeTravelState`) are **unfenced** and compile into
+Release. Fencing them would fork `build()`'s signature across build
+configurations and contaminate the composition root; carrying a few dormant
+value types is the cheaper trade.
+
 ## License
 
 [MIT](LICENSE) © s-age
