@@ -45,7 +45,18 @@ let package = Package(
             path: "Sources/Driver"
         ),
         // Presentation: SwiftUI views + view models (talk only to Kernel + Contract).
-        .target(name: "Presentation", dependencies: ["Kernel", "Contract"], path: "Sources/Presentation"),
+        // SwiftSyntax/SwiftParser back the DEBUG-only wiring graph's impl-location
+        // resolution (structural parse, not a hand-maintained table) — the same
+        // package already pulled in for the `@callable` macro plugin.
+        .target(
+            name: "Presentation",
+            dependencies: [
+                "Kernel", "Contract",
+                .product(name: "SwiftSyntax", package: "swift-syntax"),
+                .product(name: "SwiftParser", package: "swift-syntax"),
+            ],
+            path: "Sources/Presentation"
+        ),
         // App: the @main shell that wires every driver into the kernel.
         .executableTarget(
             name: "concentric-arch",
@@ -54,5 +65,6 @@ let package = Package(
         ),
         // Tests for the dispatch primitives — the load-bearing `compose` pipeline.
         .testTarget(name: "KernelTests", dependencies: ["Kernel"], path: "Tests/KernelTests"),
+        .testTarget(name: "PresentationTests", dependencies: ["Presentation", "Contract"], path: "Tests/PresentationTests"),
     ]
 )
