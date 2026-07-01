@@ -131,65 +131,28 @@ package final class Kernel: Sendable {
     /// `let`. Reads/writes hop to the main actor at the call site.
     package let buffer: Buffer
 
-    /// Serial queue for fire-and-forget commands (`dispatch`).
-    private let commands = CommandBus()
+    /// Serial queue for fire-and-forget commands (`dispatch`). Internal (not
+    /// `private`) because the DEBUG time-travel extension suspends/resumes it.
+    let commands = CommandBus()
     /// Where a dispatched command's failure goes — wired by App to the buffer.
     private let errorSink: @Sendable (any Error, String) async -> Void
     /// Where each symbol invocation is recorded (DEBUG only) — wired by App to
     /// the buffer's `TraceState`. No-op by default, so release and tests pay
     /// nothing. `span` is the node `invoke` opened; `parent` is the enclosing
     /// invoke's span (`nil` at a flow root); `payload` is the rendered input, or
-    /// `nil` when capture was toggled off.
-    private let traceSink: @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void
+    /// `nil` when capture was toggled off. Stored here (not in the DEBUG
+    /// extension — extensions can't hold stored properties), read by `traced`
+    /// in `Kernel+Trace`; a no-op closure in release, so left unfenced — fencing
+    /// it would fork `build()`'s signature across build configurations and
+    /// contaminate the App call site.
+    let traceSink: @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void
     /// Where a flow root's resulting buffer state is captured (DEBUG only) —
     /// wired by App to render the app-state stores into the buffer's
     /// `BufferHistoryState`. Fires once per flow root (`parent == nil`), after the
     /// command has settled, tagged with the root `span` so the monitor joins each
     /// snapshot to the trace forest. No-op by default — release pays nothing.
-    private let snapshotSink: @Sendable (_ root: UUID, _ at: Date) async -> Void
-
-    #if DEBUG
-    /// Ambient span of the currently-executing `invoke`, propagated down the
-    /// call tree by `TaskLocal`. Each `invoke` reads it as its `parent`, opens a
-    /// fresh `span`, and binds that span while its handler runs — so any nested
-    /// invoke (including concurrent `async let`/TaskGroup fan-out, which inherits
-    /// task-locals at creation) sees this span as its parent. A `nil` ambient
-    /// means no enclosing invoke: the node is a flow root. This is how the kernel
-    /// rebuilds, as data, the call tree the stack would have given for free.
-    @TaskLocal static var span: UUID?
-
-    /// Single runtime toggle for the monitor's two captures: each invoke's input
-    /// payload (per invoke) and the buffer's app state at each command boundary
-    /// (per flow root, the state side of time-travel). One switch because the
-    /// monitor inspects them together — there is no reason to want one without the
-    /// other. Off by default, so the common path pays only a bool load; turning it
-    /// on opts into a synchronous `String(describing:)` per invoke plus one per
-    /// app-state store per flow root. A process-global flag read on the hot path —
-    /// deliberately *not* in the `@MainActor` buffer, which would hop every invoke
-    /// onto the main actor and serialize them. The monitor's toggle binds straight
-    /// to it. The race on a lone debug bool is benign (a flip may catch one
-    /// in-flight invoke either way), so `nonisolated(unsafe)` rather than an atomic.
-    nonisolated(unsafe) package static var recordsInspection = false
-
-    /// Best-effort, length-capped *pretty* rendering of an invoke's input. Built
-    /// eagerly at the call site because `payload` is `Any` — neither `Sendable`
-    /// nor stable, so it can't be stashed and pretty-printed later (a reference
-    /// type could mutate, or refuse to cross actors); the detail pane only ever
-    /// sees this string, never the live value. `dump` walks the value with
-    /// `Mirror`, so any payload type pretty-prints (indented, multi-line) with no
-    /// conformance — matching the Buffer tab. The cap bounds what we *store*, not
-    /// what rendering costs to *build* — a huge payload is heavy regardless;
-    /// `recordsInspection` is the cost guard, the cap is hygiene.
-    package static func describePayload(_ payload: Any, cap: Int = 1024) -> String {
-        var full = ""
-        dump(payload, to: &full)
-        // `dump` ends every value with a newline; drop it so a scalar payload
-        // ("- 42\n") doesn't carry a trailing blank line into the trace.
-        if full.hasSuffix("\n") { full.removeLast() }
-        let head = full.prefix(cap)
-        return full.dropFirst(cap).isEmpty ? String(head) : String(head) + "…"
-    }
-    #endif
+    /// Unfenced for the same reason as `traceSink`.
+    let snapshotSink: @Sendable (_ root: UUID, _ at: Date) async -> Void
 
     fileprivate init(
         handlers: [String: ErasedHandler],
@@ -210,40 +173,13 @@ package final class Kernel: Sendable {
     /// `.next`/`.abort`/`.divert`/`.fail` drives the flow.
     ///
     /// This is the single chokepoint every `call`/`dispatch`/pipe stage funnels
-    /// through, so the DEBUG trace hook here sees the whole graph light up,
-    /// stage by stage — not just the outer boundaries. Because every node is an
-    /// `invoke`, building the trace tree here (read the ambient span as parent,
-    /// open a child span, bind it while the handler runs) is all it takes:
-    /// `call`/`compose`/`run`/`dispatch` need no span logic of their own — they
-    /// just thread the ambient span through, which is the whole "control as data"
-    /// claim. The record happens after the handler returns (verb is the point of
-    /// the entry), so children are recorded before their parent (post-order); the
-    /// tree is rebuilt from `span`/`parent`, not from record order.
+    /// through, so wrapping the handler in `traced` (Kernel+Trace) is all the
+    /// DEBUG monitor needs to see the whole graph light up, stage by stage — not
+    /// just the outer boundaries. In release `traced` is an inlined passthrough,
+    /// so this one body serves both configurations.
     func invoke(_ id: String, _ payload: Any) async throws -> Verb<Any> {
         guard let handler = handlers[id] else { throw KernelError.unbound(id) }
-        #if DEBUG
-        let parent = Kernel.span
-        let span = UUID()
-        // Render the input *before* the handler runs (it is the entry value, and
-        // a handler may mutate a reference payload). Skipped to a bare bool load
-        // unless payload capture is toggled on.
-        let payloadRepr = Kernel.recordsInspection ? Kernel.describePayload(payload) : nil
-        let verb = try await Kernel.$span.withValue(span) {
-            try await handler(self, payload)
-        }
-        await traceSink(id, TraceVerb(verb), span, parent, payloadRepr, Date())
-        // A flow root (`parent == nil`) completing is a command boundary: the
-        // handler has returned, so the buffer has settled. Capture the resulting
-        // state here, tagged with this root's span — the same chokepoint, no
-        // snapshot logic in `call`/`dispatch`. Children (which have a parent) skip
-        // this; we snapshot at command granularity, not per invoke.
-        if parent == nil && Kernel.recordsInspection {
-            await snapshotSink(span, Date())
-        }
-        return verb
-        #else
-        return try await handler(self, payload)
-        #endif
+        return try await traced(id, payload) { try await handler(self, payload) }
     }
 
     /// Call one symbol and get its typed `Output`. A single call is just a
@@ -275,47 +211,3 @@ extension Kernel {
         try await call(symbol, ())
     }
 }
-
-#if DEBUG
-extension Kernel {
-    /// Preview a past snapshot: write its `image` into the live buffer so the app
-    /// renders the past. Visual only — infra (SwiftData) is untouched, so the
-    /// caller must also block input (the main window disables itself behind a
-    /// banner). Same chokepoint discipline as the rest of the kernel: restore is
-    /// the one operation that runs *backward*, so it is fenced here as a DEBUG
-    /// affordance, not a core capability.
-    ///
-    /// Enter-or-scrub: the *first* call stashes the real present and freezes the
-    /// command bus; later calls (selection moved to another flow) just swap in the
-    /// new image. Re-stashing on a scrub would capture the *displayed past* as the
-    /// present, so the stash is taken once and held until `exitTimeTravel`.
-    ///
-    /// Suspends and waits for the bus to go idle *before* capturing: a command
-    /// that was already running (or queued) when preview was entered still gets
-    /// to finish and write the buffer, and the stash reflects that write instead
-    /// of losing it to the following `restore`.
-    @MainActor
-    package func previewTimeTravel(root: UUID, image: BufferImage) async {
-        if buffer.read(TimeTravelState.self).stashedPresent == nil {
-            await commands.suspendAndWaitUntilIdle()
-            let present = buffer.capture(Set(image.keys))
-            buffer.mutate(TimeTravelState.self) { $0.stashedPresent = present }
-        }
-        buffer.restore(image)
-        buffer.mutate(TimeTravelState.self) { $0.previewRoot = root }
-    }
-
-    /// Leave the preview: put the stashed present back and resume command draining.
-    /// No-op if no preview is active.
-    @MainActor
-    package func exitTimeTravel() {
-        guard let present = buffer.read(TimeTravelState.self).stashedPresent else { return }
-        buffer.restore(present)
-        commands.resumeDraining()
-        buffer.mutate(TimeTravelState.self) {
-            $0.previewRoot = nil
-            $0.stashedPresent = nil
-        }
-    }
-}
-#endif
