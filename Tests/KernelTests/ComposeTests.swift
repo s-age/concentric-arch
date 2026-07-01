@@ -168,14 +168,14 @@ func dispatchRoutesFailureToTheErrorSink() async throws {
     let kernel = await MainActor.run { () -> Kernel in
         let builder = KernelBuilder()
         builder.register(boom) { _ -> Verb<Void> in .fail(Boom()) }
-        return builder.build(buffer: BufferBuilder().build()) { error in
-            await probe.hit("err:\(error)")
+        return builder.build(buffer: BufferBuilder().build()) { error, symbol in
+            await probe.hit("err:\(error):\(symbol)")
         }
     }
 
     kernel.dispatch(boom, 1)
     try await until { await probe.hits.count == 1 }
-    #expect(await probe.hits.first?.hasPrefix("err:") == true)
+    #expect(await probe.hits.first == "err:Boom():test.boom")
 }
 
 // MARK: - trace (DEBUG: every invocation, including pipe internals)

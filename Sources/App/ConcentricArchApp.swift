@@ -89,8 +89,8 @@ struct ConcentricArchApp: App {
             let buffer = bufferBuilder.build()
             kernel = builder.build(
                 buffer: buffer,
-                onError: { error in
-                    await buffer.mutate(AppErrorState.self) { $0.message = error.localizedDescription }
+                onError: { error, symbol in
+                    await buffer.mutate(AppErrorState.self) { $0.message = "\(symbol): \(error.localizedDescription)" }
                 },
                 onTrace: { symbol, verb, span, parent, payload, at in
                     #if DEBUG

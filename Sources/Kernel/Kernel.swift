@@ -87,10 +87,12 @@ package final class KernelBuilder {
     /// Freeze the bindings into an immutable `Kernel`. `onError` is the sink for
     /// failures of fire-and-forget commands (`Kernel.dispatch`): the App wires it
     /// to publish into the buffer's error state, so the kernel routes errors
-    /// through the buffer without knowing the concrete error-state type.
+    /// through the buffer without knowing the concrete error-state type. `symbol`
+    /// is the id of the dispatched command that failed — the caller already holds
+    /// it, so it travels alongside the error rather than being dropped.
     package func build(
         buffer: Buffer,
-        onError: @escaping @Sendable (any Error) async -> Void = { _ in },
+        onError: @escaping @Sendable (_ error: any Error, _ symbol: String) async -> Void = { _, _ in },
         onTrace: @escaping @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void = { _, _, _, _, _, _ in },
         onSnapshot: @escaping @Sendable (_ root: UUID, _ at: Date) async -> Void = { _, _ in }
     ) -> Kernel {
@@ -116,7 +118,7 @@ package final class Kernel: Sendable {
     /// Serial queue for fire-and-forget commands (`dispatch`).
     private let commands = CommandBus()
     /// Where a dispatched command's failure goes — wired by App to the buffer.
-    private let errorSink: @Sendable (any Error) async -> Void
+    private let errorSink: @Sendable (any Error, String) async -> Void
     /// Where each symbol invocation is recorded (DEBUG only) — wired by App to
     /// the buffer's `TraceState`. No-op by default, so release and tests pay
     /// nothing. `span` is the node `invoke` opened; `parent` is the enclosing
@@ -176,7 +178,7 @@ package final class Kernel: Sendable {
     fileprivate init(
         handlers: [String: ErasedHandler],
         buffer: Buffer,
-        errorSink: @escaping @Sendable (any Error) async -> Void,
+        errorSink: @escaping @Sendable (any Error, String) async -> Void,
         traceSink: @escaping @Sendable (String, TraceVerb, UUID, UUID?, String?, Date) async -> Void,
         snapshotSink: @escaping @Sendable (UUID, Date) async -> Void
     ) {
@@ -245,7 +247,7 @@ package final class Kernel: Sendable {
             do {
                 _ = try await call(symbol, payload)
             } catch {
-                await errorSink(error)
+                await errorSink(error, symbol.id)
             }
         }
     }
