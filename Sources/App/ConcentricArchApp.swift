@@ -126,21 +126,14 @@ struct ConcentricArchApp: App {
                 .keyboardShortcut("m", modifiers: [.command, .option])
                 Button("Toggle Wiring Graph") {
                     // Introspect the real Circuit pipes here (App is the composition
-                    // root that can see Circuit) and inject the derived shape.
-                    let pipelines = circuitWiringIntrospection().map { intro in
-                        WiringPipeline(
-                            key: intro.key,
-                            title: intro.title,
-                            input: intro.inputType,
-                            stages: intro.stages.map(WiringStage.init(descriptor:)),
-                            note: intro.note
-                        )
-                    }
-                    // The conventions bundle: style defaults match this repo's
-                    // layers; the impl-jump resolver comes from the SyntaxTools
-                    // target (default `ImplSourceConventions` = this repo's layout).
+                    // root that can see Circuit) and inject the derived shape —
+                    // already in the kernel's canonical carrier (`[PipeDescriptor]`),
+                    // so no mapping. The conventions bundle: style defaults match
+                    // this repo's layers; the impl-jump resolver comes from the
+                    // SyntaxTools target (default `ImplSourceConventions` = this
+                    // repo's layout).
                     WiringGraphWindow.toggle(
-                        pipelines: pipelines,
+                        pipelines: circuitWiringIntrospection(),
                         configuration: WiringGraphConfiguration(
                             resolveImplLocation: makeImplLocationResolver()
                         )

@@ -55,7 +55,7 @@ private func allDescriptors(in stages: [StageDescriptor]) -> [StageDescriptor] {
     let missing = bound.subtracting(registered).sorted()
     #expect(
         missing.isEmpty,
-        "Circuit endpoints absent from circuitWiringIntrospection() — add an entry(…) (or a pipe-less carrier, cf. closeSlideshow) in Circuit/WiringIntrospection.swift: \(missing)"
+        "Circuit endpoints absent from circuitWiringIntrospection() — add a PipeDescriptor(…) (or a pipe-less one with empty stages, cf. closeSlideshow) in Circuit/WiringIntrospection.swift: \(missing)"
     )
 }
 

@@ -1,6 +1,7 @@
 #if DEBUG
 import SwiftUI
 import struct Kernel.SourceLocation
+import struct Kernel.StageDescriptor
 
 /// Everything about the wiring graph that is *a repository's convention*, not
 /// the graph's own logic — injected by the composition root so the view stays
@@ -70,9 +71,9 @@ public struct WiringGraphConfiguration: Sendable {
 
     /// The concrete-impl location for a symbol node, or `nil` for an anonymous
     /// node, a miss, or when no resolver was injected.
-    func implLocation(for stage: WiringStage) -> SourceLocation? {
+    func implLocation(for stage: StageDescriptor) -> SourceLocation? {
         guard let resolve = resolveImplLocation,
-              let symbol = stage.symbol,
+              let symbol = stage.symbolID,
               let site = stage.wireSite
         else { return nil }
         return resolve(symbol, site)
