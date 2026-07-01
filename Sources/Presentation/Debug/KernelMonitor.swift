@@ -55,8 +55,8 @@ final class KernelMonitorViewModel {
 
     /// Reflect a snapshot into the live buffer (freezes the app behind a banner);
     /// repeated calls scrub between snapshots without leaving the preview.
-    func preview(_ snapshot: BufferSnapshot) {
-        kernel.previewTimeTravel(root: snapshot.root, image: snapshot.image)
+    func preview(_ snapshot: BufferSnapshot) async {
+        await kernel.previewTimeTravel(root: snapshot.root, image: snapshot.image)
     }
 
     /// Return the live app to the present.
@@ -145,7 +145,7 @@ struct KernelMonitorView: View {
     private func reflectSelectionIfFollowing() {
         guard followsSelection else { return }
         if let entry = selectedEntry, let snapshot = viewModel.snapshot(for: entry) {
-            viewModel.preview(snapshot)
+            Task { await viewModel.preview(snapshot) }
         } else {
             viewModel.exitPreview()
         }
@@ -247,7 +247,7 @@ struct KernelMonitorView: View {
                                 Button("Return to present") { selection = nil; viewModel.exitPreview() }
                                     .controlSize(.small)
                             } else if !followsSelection {
-                                Button("Reflect to app") { viewModel.preview(snapshot) }
+                                Button("Reflect to app") { Task { await viewModel.preview(snapshot) } }
                                     .controlSize(.small)
                                     .help("Write this snapshot into the live buffer and freeze the app on it (infra is untouched — visual preview only)")
                             }
