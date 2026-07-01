@@ -307,13 +307,13 @@ private final class MonitorPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-/// Opens/closes the monitor as a single floating panel. App wires a Debug menu
-/// command to `toggle`.
+/// Opens/closes the monitor as a single floating panel. The composition root
+/// wires a Debug menu command to `toggle`.
 @MainActor
-package enum KernelMonitorWindow {
+public enum KernelMonitorWindow {
     private static var panel: NSPanel?
 
-    package static func toggle(kernel: Kernel) {
+    public static func toggle(kernel: Kernel) {
         if let panel {
             panel.close()
             Self.panel = nil

@@ -45,27 +45,44 @@ let package = Package(
             path: "Sources/Driver"
         ),
         // Presentation: SwiftUI views + view models (talk only to Kernel + Contract).
-        // SwiftSyntax/SwiftParser back the DEBUG-only wiring graph's impl-location
-        // resolution (structural parse, not a hand-maintained table) — the same
-        // package already pulled in for the `@callable` macro plugin.
+        .target(name: "Presentation", dependencies: ["Kernel", "Contract"], path: "Sources/Presentation"),
+        // KernelDebugUI: the DEBUG-only kernel monitor + wiring graph. Framework
+        // tooling, not an app device — depends on Kernel alone (all data arrives
+        // via injection from the composition root), so it extracts with the kernel.
+        .target(name: "KernelDebugUI", dependencies: ["Kernel"], path: "Sources/KernelDebugUI"),
+        // KernelDebugUISyntaxTools: the structural (SwiftSyntax) impl-location
+        // resolver behind the wiring graph's "open the implementation" jump.
+        // Deliberately a separate target: SwiftPM has no per-configuration
+        // dependencies, so this is the only way a framework consumer who doesn't
+        // need impl jumps can avoid resolving/linking swift-syntax at all
+        // (wire-site jumps are `#filePath`/`#line` captures — no parser needed).
         .target(
-            name: "Presentation",
+            name: "KernelDebugUISyntaxTools",
             dependencies: [
-                "Kernel", "Contract",
+                "Kernel",
                 .product(name: "SwiftSyntax", package: "swift-syntax"),
                 .product(name: "SwiftParser", package: "swift-syntax"),
             ],
-            path: "Sources/Presentation"
+            path: "Sources/KernelDebugUISyntaxTools"
         ),
         // App: the @main shell that wires every driver into the kernel.
         .executableTarget(
             name: "concentric-arch",
-            dependencies: ["Kernel", "Contract", "Infrastructure", "Circuit", "Driver", "Presentation"],
+            dependencies: [
+                "Kernel", "Contract", "Infrastructure", "Circuit", "Driver", "Presentation",
+                "KernelDebugUI", "KernelDebugUISyntaxTools",
+            ],
             path: "Sources/App"
         ),
         // Tests for the dispatch primitives — the load-bearing `compose` pipeline.
         .testTarget(name: "KernelTests", dependencies: ["Kernel"], path: "Tests/KernelTests"),
-        .testTarget(name: "PresentationTests", dependencies: ["Presentation", "Contract"], path: "Tests/PresentationTests"),
+        // DebugToolingTests: the impl-location resolver checked against this repo's
+        // real sources (every Callable symbol must resolve to its `func` line).
+        .testTarget(
+            name: "DebugToolingTests",
+            dependencies: ["Kernel", "Contract", "KernelDebugUISyntaxTools"],
+            path: "Tests/DebugToolingTests"
+        ),
         // WiringTests: exhaustiveness smoke tests over the real Driver manifest —
         // wires stub stores (keys only, never invoked) and cross-checks the derived
         // bound-symbol set against the hand-maintained WiringIntrospection registry.

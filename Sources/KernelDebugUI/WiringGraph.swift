@@ -3,18 +3,20 @@ import AppKit
 import SwiftUI
 import Kernel
 
-/// A node-analysis view of the Circuit pipelines — opened from the Debug menu,
-/// separate from the `KernelMonitor`. Where the monitor shows the *runtime* trace,
-/// this shows the *shape*: each Circuit file expanded into its pipe stages.
+/// A node-analysis view of the orchestration pipelines — opened from the Debug
+/// menu, separate from the `KernelMonitor`. Where the monitor shows the *runtime*
+/// trace, this shows the *shape*: each pipeline expanded into its pipe stages.
 ///
-/// Layout is master-detail: a fixed-width Circuit list on the left, the selected
+/// Layout is master-detail: a fixed-width pipeline list on the left, the selected
 /// pipeline's node flow (top-to-bottom) on the right, and a node-inspector below
 /// the canvas. The downward flow keeps reading low-effort — no horizontal scrub.
 ///
-/// The structure is now **derived by static introspection**, not hand-authored:
-/// App reads each real `Pipe`'s `StageDescriptor`s (`circuitWiringIntrospection()`)
-/// and injects them as `[WiringPipeline]`. Kind/symbol/flowing-type are all read
-/// from the actual pipelines, so the picture cannot drift from the code.
+/// The structure is **derived by static introspection**, not hand-authored: the
+/// composition root reads each real `Pipe`'s `StageDescriptor`s and injects them
+/// as `[WiringPipeline]`. Kind/symbol/flowing-type are all read from the actual
+/// pipelines, so the picture cannot drift from the code. What is a *repository's*
+/// convention — layer colours, key elision, the impl-jump resolver — arrives the
+/// same way, via `WiringGraphConfiguration`.
 ///
 /// What is *not* derivable stays out: the non-`.next` branch verbs (`.fail` guards)
 /// live inside opaque closures, and prose descriptions are a separate concern — a
@@ -41,7 +43,7 @@ enum StageKind: String {
 /// leaving this stage — the label on the outgoing `.next` wire. `branches` lists
 /// non-`.next` verbs (not statically derivable, so empty from the introspected
 /// source — kept for a future annotation overlay).
-package struct WiringStage {
+public struct WiringStage: Sendable {
     let kind: StageKind
     let symbol: String?
     let flows: String
@@ -65,7 +67,7 @@ package struct WiringStage {
     /// prose `note` is the symbol's own `description` — lifted by the `@callable`
     /// macro from the port method's doc comment — so there's no separate lookup to
     /// maintain. Anonymous stages (map/effect) carry none and show only their kind.
-    package init(descriptor: StageDescriptor) {
+    public init(descriptor: StageDescriptor) {
         self.kind = StageKind(rawValue: descriptor.kind.rawValue) ?? .effect
         self.symbol = descriptor.symbolID
         self.flows = prettyType(descriptor.flows)
@@ -77,10 +79,10 @@ package struct WiringStage {
     }
 }
 
-/// One Circuit file expanded: the dispatch key it backs, the payload that enters
+/// One pipeline expanded: the dispatch key it backs, the payload that enters
 /// the pipe, and the ordered stages. `note` carries out-of-pipe context (work that
 /// happens around `kernel.run` and so is invisible to the static source).
-package struct WiringPipeline {
+public struct WiringPipeline: Sendable {
     let key: String        // the dispatch key the pipe backs, e.g. "Circuit.Slideshow.update"
     let title: String      // the saga function, e.g. "updateSlideshow"
     let input: String      // the type fed into the pipe
@@ -89,7 +91,7 @@ package struct WiringPipeline {
 
     var branchCount: Int { stages.reduce(0) { $0 + $1.branches.count } }
 
-    package init(key: String, title: String, input: String, stages: [WiringStage], note: String?) {
+    public init(key: String, title: String, input: String, stages: [WiringStage], note: String?) {
         self.key = key
         self.title = title
         self.input = prettyType(input)
@@ -109,20 +111,6 @@ private func prettyType(_ raw: String) -> String {
     return s == "()" ? "Void" : s
 }
 
-// MARK: - Layer palette
-
-/// Colour a node by the layer its symbol lives in (the dotted prefix). Anonymous
-/// stages (map/effect/verb) have no symbol, so they read neutral grey.
-private func layerColor(_ symbol: String?) -> Color {
-    switch symbol?.split(separator: ".").first {
-    case "Presentation":   return .pink
-    case "Circuit":        return .orange
-    case "Compute":        return .green
-    case "Infrastructure": return .blue
-    default:               return .gray
-    }
-}
-
 // MARK: - Source navigation
 //
 // Opening the code behind a node is this architecture's missing piece: symbol-keyed
@@ -130,29 +118,13 @@ private func layerColor(_ symbol: String?) -> Color {
 // concrete handler. Two targets per node:
 //   • wire-site  — precise (file:line, captured by the builder). For an anonymous
 //                  stage this IS its implementation (the closure). Non-rotting.
-//   • impl       — the concrete leaf handler, resolved STRUCTURALLY from the symbol
-//                  id (see `ImplLocationResolver.swift`): `@callable`'s protocol name
-//                  → whichever type conforms to it → wherever that type actually
-//                  defines the method. No hand-maintained table, no regex — every
-//                  file is re-read and re-parsed on each lookup, so it always
-//                  reflects what's on disk right now, rebuild or not.
-
-/// Derive the repo root from any absolute source path under `<root>/Sources/…`
-/// (every wire-site is such a path), so the resolver's directory scans can anchor.
-private func repoRoot(from absolutePath: String) -> String? {
-    guard let r = absolutePath.range(of: "/Sources/") else { return nil }
-    return String(absolutePath[absolutePath.startIndex..<r.lowerBound])
-}
-
-/// The concrete-impl location for a symbol node, anchored to the repo root taken
-/// from the node's own wire-site. `nil` for anonymous nodes or a miss.
-private func implLocation(for stage: WiringStage) -> SourceLocation? {
-    guard let symbol = stage.symbol,
-          let site = stage.wireSite,
-          let root = repoRoot(from: site.file)
-    else { return nil }
-    return resolveImplLocation(forSymbol: symbol, repoRoot: root)
-}
+//   • impl       — the concrete leaf handler, resolved from the symbol id by the
+//                  *injected* `WiringGraphConfiguration.resolveImplLocation`. The
+//                  swift-syntax-backed resolver lives in the separate
+//                  `KernelDebugUISyntaxTools` target (`makeImplLocationResolver`);
+//                  keeping it out of this module is what lets a consumer skip the
+//                  swift-syntax dependency entirely — without a resolver the node
+//                  simply falls back to its wire-site.
 
 private func fileName(_ path: String) -> String {
     URL(fileURLWithPath: path).lastPathComponent
@@ -179,6 +151,7 @@ private func openInEditor(_ loc: SourceLocation) {
 // MARK: - Root view (master-detail)
 
 struct WiringGraphView: View {
+    @Environment(\.wiringGraphConfiguration) private var configuration
     @State private var selectedKey: String?
     @State private var selectedStage: Int?
     @State private var search = ""
@@ -193,7 +166,7 @@ struct WiringGraphView: View {
     /// Circuit pipes — this view does not depend on Circuit.
     private let pipelines: [WiringPipeline]
 
-    package init(pipelines: [WiringPipeline]) {
+    init(pipelines: [WiringPipeline]) {
         self.pipelines = pipelines
         _selectedKey = State(initialValue: pipelines.first?.key)
     }
@@ -363,18 +336,18 @@ struct WiringGraphView: View {
                 let input = idx == 0 ? pipeline.input : pipeline.stages[idx - 1].flows
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        RoundedRectangle(cornerRadius: 3).fill(layerColor(stage.symbol)).frame(width: 11, height: 11)
+                        RoundedRectangle(cornerRadius: 3).fill(configuration.style.color(forSymbol: stage.symbol)).frame(width: 11, height: 11)
                         Text(stage.symbol ?? stage.note ?? "anonymous").font(.system(.headline, design: .monospaced))
                         Text(stage.kind.rawValue)
                             .font(.system(.caption, design: .monospaced))
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(layerColor(stage.symbol).opacity(0.18)))
+                            .background(Capsule().fill(configuration.style.color(forSymbol: stage.symbol).opacity(0.18)))
                     }
                     detailRow("payload", "\(input)  →  \(stage.flows)")
                     detailRow("emits", ([".next"] + stage.branches).joined(separator: "     "))
                     if stage.kind == .fork { detailRow("branches", "\(stage.forkBranches.count)") }
                     if let note = stage.note { detailRow("description", note) }
-                    if let impl = implLocation(for: stage) {
+                    if let impl = configuration.implLocation(for: stage) {
                         openRow("implementation", "\(fileName(impl.file))  (resolved)", impl)
                     }
                     if let site = stage.wireSite {
@@ -423,13 +396,14 @@ struct WiringGraphView: View {
 // MARK: - Sidebar row
 
 private struct SidebarRow: View {
+    @Environment(\.wiringGraphConfiguration) private var configuration
     let pipeline: WiringPipeline
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
             Text(pipeline.title).font(.system(.body, design: .monospaced))
             HStack(spacing: 8) {
-                Text(pipeline.key.replacingOccurrences(of: "Circuit.", with: ""))
+                Text(configuration.style.sidebarKeyLabel(pipeline.key))
                     .font(.caption2).foregroundStyle(.secondary)
                 Spacer()
                 Label("\(pipeline.stages.count)", systemImage: "square.stack.3d.up.fill")
@@ -512,6 +486,7 @@ private struct ForkBranchesView: View {
 /// note, and any branch-verb badges. `mainLineOnly` strips notes + branches to the
 /// spine; `collapsed` shrinks anonymous map/effect to a compact row.
 private struct StageNodeView: View {
+    @Environment(\.wiringGraphConfiguration) private var configuration
     let stage: WiringStage
     let isSelected: Bool
     let mainLineOnly: Bool
@@ -526,7 +501,7 @@ private struct StageNodeView: View {
 
     /// The node's primary "open" target: the concrete impl for a symbol node, else
     /// the wire-site (which, for an anonymous stage, is its closure).
-    private var primaryTarget: SourceLocation? { implLocation(for: stage) ?? stage.wireSite }
+    private var primaryTarget: SourceLocation? { configuration.implLocation(for: stage) ?? stage.wireSite }
 
     var body: some View {
         Group {
@@ -535,7 +510,7 @@ private struct StageNodeView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? Color.accentColor : layerColor(stage.symbol),
+                .stroke(isSelected ? Color.accentColor : configuration.style.color(forSymbol: stage.symbol),
                         lineWidth: isSelected ? 3 : 1.5)
         )
         .contentShape(Rectangle())
@@ -546,7 +521,7 @@ private struct StageNodeView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(stage.kind.rawValue)
                     .font(.system(.caption, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(layerColor(stage.symbol))
+                    .foregroundStyle(configuration.style.color(forSymbol: stage.symbol))
                 Spacer()
                 if let target = primaryTarget {
                     Button { openInEditor(target) } label: {
@@ -654,21 +629,28 @@ private final class WiringGraphPanel: NSPanel {
     override var canBecomeKey: Bool { true }
 }
 
-/// Opens/closes the wiring graph as a single floating panel. App wires a Debug menu
-/// command to `toggle`, passing the pipelines it introspected from the real Circuit
-/// pipes (App is the composition root that can see Circuit; this view cannot).
+/// Opens/closes the wiring graph as a single floating panel. The composition root
+/// wires a Debug menu command to `toggle`, passing the pipelines it introspected
+/// from its real orchestration pipes (only the root can see them; this view
+/// cannot), plus the repo conventions bundle — impl-jump resolver and style.
 @MainActor
-package enum WiringGraphWindow {
+public enum WiringGraphWindow {
     private static var panel: NSPanel?
 
-    package static func toggle(pipelines: [WiringPipeline]) {
+    public static func toggle(
+        pipelines: [WiringPipeline],
+        configuration: WiringGraphConfiguration = WiringGraphConfiguration()
+    ) {
         if let panel {
             panel.close()
             Self.panel = nil
             return
         }
         let panel = WiringGraphPanel()
-        panel.contentView = NSHostingView(rootView: WiringGraphView(pipelines: pipelines))
+        panel.contentView = NSHostingView(
+            rootView: WiringGraphView(pipelines: pipelines)
+                .environment(\.wiringGraphConfiguration, configuration)
+        )
         panel.center()
         panel.orderFront(nil)
         Self.panel = panel
