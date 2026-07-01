@@ -271,6 +271,50 @@ func concurrentCallsSeparateIntoDistinctRoots() async throws {
 }
 
 @Test
+func forkBranchesAttachAsSiblingsUnderTheSharedParentSpan() async throws {
+    // A composing handler that forks into two branches. `async let` inherits
+    // the ambient `Kernel.span` at the point each child task is created — both
+    // branches are declared while the root invoke's span is still bound, so
+    // both branch leaves must land as siblings under that one root, not as
+    // their own separate flow roots. Card 18's "要調査": does task-local
+    // parent propagation already reach fork's concurrent children? Yes.
+    let collector = TraceCollector()
+    let branchA = Symbol<Int, Int>("test.fork.branchA")
+    let branchB = Symbol<Int, Int>("test.fork.branchB")
+    let root = Symbol<Int, (Int, Int)>("test.fork.root")
+
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(branchA) { $0 * 2 }
+        builder.register(branchB) { $0 * 3 }
+        builder.register(root) { (k: Kernel, n: Int) async throws -> (Int, Int) in
+            try await k.compose(
+                pipeline(note: "identity") { (_, x: Int) -> Verb<Int> in .next(x) }
+                    .fork(pipeline(branchA).seal(), pipeline(branchB).seal())
+                    .seal(),
+                n
+            )
+        }
+        return builder.build(
+            buffer: BufferBuilder().build(),
+            onTrace: { symbol, _, span, parent, _, _ in await collector.add(symbol, span, parent) }
+        )
+    }
+
+    let result = try await kernel.call(root, 5)
+    #expect(result == (10, 15))
+
+    let records = await collector.records
+    let rootRecord = try #require(records.first { $0.symbol == "test.fork.root" })
+    #expect(rootRecord.parent == nil) // the fork'd pipe's own flow root
+
+    let branchRecords = records.filter { $0.symbol == "test.fork.branchA" || $0.symbol == "test.fork.branchB" }
+    #expect(branchRecords.count == 2)
+    #expect(branchRecords.allSatisfy { $0.parent == rootRecord.span }) // both siblings under root
+    #expect(Set(branchRecords.map(\.span)).count == 2) // distinct node identities
+}
+
+@Test
 func traceStateRingTrimsToCapAndKeepsSequence() {
     var state = TraceState()
     let epoch = Date(timeIntervalSince1970: 0)
@@ -437,6 +481,48 @@ func divertDiscardsRestAndRunsTheOtherPipe() async throws {
     let result = try await kernel.compose(main, 0) // diverted: 1000 -> +2 -> 1002
     #expect(result == 1002)
     #expect(await probe.hits.isEmpty) // post-divert stage discarded
+}
+
+@Test
+func runAlsoDivertsWithoutReturningAValue() async throws {
+    let kernel = await makeKernel()
+    let probe = Probe()
+    let alt = pipeline(note: "alt") { (_, n: Int) -> Verb<Int> in
+        await probe.hit("alt:\(n)")
+        return .next(n)
+    }.seal()
+
+    let main = pipeline(increment)
+        .pipe { (_, _: Int) -> Verb<Int> in .divert(Diversion(alt, 999)) }
+        .pipe { _, n in await probe.hit("after-divert"); return .next(n) }
+        .seal()
+
+    try await kernel.run(main, 0)
+    #expect(await probe.hits == ["alt:999"]) // post-divert stage discarded here too
+}
+
+/// `loopStep` diverts back to a freshly-built one-stage pipe of itself
+/// (PipelineA -> SwitchA -> PipelineA -> SwitchA -> ... -> abort) — a loop
+/// built entirely from `.divert`, no dedicated loop construct. `compose` must
+/// run this as *iteration* (swap the stage list, keep going), not as a nested
+/// `compose` call per hop — otherwise a long-running agent/stream loop would
+/// grow one async stack frame per hop and eventually choke. A high iteration
+/// count here is the regression guard: if `.divert` ever goes back to
+/// recursing, this either crashes or gets dramatically slower.
+@Test
+func divertLoopIsIterativeNotRecursive() async throws {
+    let iterations = 100_000
+    let loopStep = Symbol<Int, Int>("test.loopStep")
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(loopStep) { n -> Verb<Int> in
+            n >= iterations ? .abort(n) : .divert(Diversion(pipeline(loopStep).seal(), n + 1))
+        }
+        return builder.build(buffer: BufferBuilder().build())
+    }
+
+    let result = try await kernel.compose(pipeline(loopStep).seal(), 0)
+    #expect(result == iterations)
 }
 
 // MARK: - .fail
