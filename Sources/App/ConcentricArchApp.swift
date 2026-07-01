@@ -51,16 +51,12 @@ struct ConcentricArchApp: App {
             // Allocate the named containers of the typed, observable state region.
             // App owns this "provide the vessels" role: each `allocate` seeds one
             // Store, keyed by its state type, that Presentation later reads via
-            // `kernel.buffer` and Circuit writes into.
+            // `kernel.buffer` and Circuit writes into. Only *app* states are
+            // listed — the kernel-owned ones (`KernelErrorState`, and in DEBUG
+            // the monitor states) are seeded by `build()` itself.
             let bufferBuilder = BufferBuilder()
             bufferBuilder.allocate(LibraryState())
             bufferBuilder.allocate(SlideshowState())
-            bufferBuilder.allocate(AppErrorState())
-            #if DEBUG
-            bufferBuilder.allocate(TraceState())
-            bufferBuilder.allocate(BufferHistoryState())
-            bufferBuilder.allocate(TimeTravelState())
-            #endif
 
             // Bind every device onto the bus via the Driver gateway, so a
             // call/dispatch for a symbol routes to its concrete handler. The stores
@@ -72,21 +68,12 @@ struct ConcentricArchApp: App {
                 slideshowStore: makeSlideshowStore(modelContainer),
                 config: makeConfigStore(modelContainer)
             )
-            // The kernel routes a dispatched command's failure here; App owns the
-            // concrete error-state type, so it writes the buffer on the kernel's behalf.
-            let buffer = bufferBuilder.build()
+            // The sinks are framework defaults: a dispatched command's failure
+            // renders into `KernelErrorState` (the banner), traces record into
+            // `TraceState` (caps tunable via `monitor: MonitorOptions(...)`).
+            // Inject `onError`/`onTrace` here only for a custom shape.
             kernel = builder.build(
-                buffer: buffer,
-                onError: { error, symbol in
-                    await buffer.mutate(AppErrorState.self) { $0.message = "\(symbol): \(error.localizedDescription)" }
-                },
-                onTrace: { symbol, verb, span, parent, payload, at in
-                    #if DEBUG
-                    await buffer.mutate(TraceState.self) {
-                        $0.record(symbol: symbol, verb: verb, span: span, parent: parent, payload: payload, at: at, cap: 300)
-                    }
-                    #endif
-                },
+                buffer: bufferBuilder.build(),
                 // State side of time-travel: which stores each command-boundary
                 // snapshot captures (rendered for the monitor + typed image for
                 // live-restore). App still owns the list — the kernel absorbs the
@@ -94,7 +81,7 @@ struct ConcentricArchApp: App {
                 // `TraceState`/`BufferHistoryState`/`TimeTravelState` are simply
                 // not listed: the trace, the history, and the preview flag are not
                 // part of the world we rewind.
-                snapshotStates: [LibraryState.self, SlideshowState.self, AppErrorState.self]
+                snapshotStates: [LibraryState.self, SlideshowState.self, KernelErrorState.self]
             )
         } catch {
             fatalError("Initialization failed: \(error)")

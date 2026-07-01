@@ -18,11 +18,11 @@ extension KernelBuilder {
     /// Build the snapshot sink for the declared states: one `MainActor.run` hop
     /// that captures the stores as a typed `BufferImage` (for live-restore) and
     /// renders each to text (for the monitor's Buffer tab), then appends to
-    /// `BufferHistoryState` — a capped ring, like the trace. Dumps keep the
-    /// declared order, so the monitor's display is stable. A declared state
-    /// whose store was never allocated traps at the first snapshot, mirroring
-    /// `Buffer.read`'s missing-allocation precondition.
-    static func snapshotSink(states: [Any.Type], buffer: Buffer) -> @Sendable (UUID, Date) async -> Void {
+    /// `BufferHistoryState` — a ring capped at `cap` (`MonitorOptions.snapshotCap`),
+    /// like the trace. Dumps keep the declared order, so the monitor's display
+    /// is stable. A declared state whose store was never allocated traps at the
+    /// first snapshot, mirroring `Buffer.read`'s missing-allocation precondition.
+    static func snapshotSink(states: [Any.Type], buffer: Buffer, cap: Int) -> @Sendable (UUID, Date) async -> Void {
         if states.isEmpty { return { _, _ in } }
         // Erase the metatypes up front: keys + names are `Sendable`, the list of
         // `Any.Type` is not, and the sink must not retain app types anyway.
@@ -38,7 +38,7 @@ extension KernelBuilder {
                     return StoreDump(name: cell.name, value: prettyDump(value))
                 }
                 buffer.mutate(BufferHistoryState.self) {
-                    $0.record(root: root, stores: dumps, image: image, at: at, cap: 100)
+                    $0.record(root: root, stores: dumps, image: image, at: at, cap: cap)
                 }
             }
         }
@@ -58,7 +58,7 @@ private func prettyDump(_ value: Any) -> String {
 #else
 extension KernelBuilder {
     /// Release: snapshots don't exist — the sink is a no-op whatever the list.
-    static func snapshotSink(states: [Any.Type], buffer: Buffer) -> @Sendable (UUID, Date) async -> Void {
+    static func snapshotSink(states: [Any.Type], buffer: Buffer, cap: Int) -> @Sendable (UUID, Date) async -> Void {
         { _, _ in }
     }
 }

@@ -71,7 +71,7 @@ There are four ways to send into the `Kernel`. Choose by **whether there is a re
 |---|---|---|---|
 | `kernel.call(symbol, payload) -> O` | yes | A one-off query that needs a value (i.e. a one-stage pipe). | `throws` |
 | `kernel.compose(pipe, payload) -> O` | yes | A value-returning pipeline. The `.abort` / `.divert` value becomes the result. *Reserved: no production caller at present — kept for synchronous needs (e.g. MCP-style tools) and as the engine behind `.divert`.* | `throws` |
-| `kernel.dispatch(symbol, payload)` | **none** (fire-and-forget) | **Presentation's main entry point.** Enqueues on the serial bus and returns immediately — no `await`, no return value, no `throws`. | Routed to `buffer` (`AppErrorState`) via `errorSink` |
+| `kernel.dispatch(symbol, payload)` | **none** (fire-and-forget) | **Presentation's main entry point.** Enqueues on the serial bus and returns immediately — no `await`, no return value, no `throws`. | Routed to `buffer` (`KernelErrorState`) via `errorSink` |
 | `kernel.run(pipe, payload)` | **none** (forward-only) | **Circuit's commands.** Discards the final value; results are published into `buffer` through `.tap` / `.effect`. | `throws` (caught by the caller — `dispatch`) |
 
 Typical path: `Presentation.dispatch` → the Kernel `call`s through the serial bus → a Circuit handler streams forward with `kernel.run(pipe)` → an `effect` updates the `buffer` → Presentation re-renders from its subscription. The point is that **nothing is returned by value.**

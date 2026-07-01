@@ -97,34 +97,40 @@ package final class KernelBuilder {
     /// Freeze the bindings into an immutable `Kernel`. The `Buffer` (the typed,
     /// observable state region) is built separately by `BufferBuilder` and handed
     /// in here, so the kernel owns both the behaviour side (`call`) and the state
-    /// side (`buffer`). `onError` is the sink for failures of fire-and-forget
-    /// commands (`Kernel.dispatch`): the App wires it to publish into the buffer's
-    /// error state, so the kernel routes errors through the buffer without
-    /// knowing the concrete error-state type. `symbol` is the id of the
-    /// dispatched command that failed — the caller already holds it, so it
-    /// travels alongside the error rather than being dropped. `onTrace` is the
-    /// DEBUG trace sink: the App wires it to record spans without the kernel
-    /// knowing anything about the monitor's concrete state types.
-    /// `snapshotStates` is the state side of time-travel, declared instead of
-    /// wired: the buffer stores to capture at each command boundary (rendered
-    /// for display + typed image for live-restore, recorded into
-    /// `BufferHistoryState`). The caller still owns *which* states participate;
-    /// the kernel absorbs the mechanics — see `KernelBuilder+Snapshot`. The
-    /// kernel stays state-agnostic: the list is erased to keys and names, never
-    /// concrete types. Empty (the default) means no snapshots; in release the
-    /// sink is a no-op regardless.
+    /// side (`buffer`). Both sinks default to framework implementations that
+    /// target the kernel's own buffer states — the injection points remain, so
+    /// the kernel still never names an *app* state type:
+    /// - `onError` is the sink for failures of fire-and-forget commands
+    ///   (`Kernel.dispatch`). `symbol` is the id of the dispatched command that
+    ///   failed — the caller already holds it, so it travels alongside the error
+    ///   rather than being dropped. Omitted, failures render into
+    ///   `KernelErrorState` (release too); inject to publish into a custom
+    ///   error state instead.
+    /// - `onTrace` is the DEBUG trace sink. Omitted, every invocation records
+    ///   into `TraceState`, capped at `monitor.traceCap`; inject to record
+    ///   elsewhere (an injected sink owns its own cap).
+    /// `monitor` carries the DEBUG tuning knobs (ring caps today) as one value,
+    /// ignored in release. `snapshotStates` is the state side of time-travel,
+    /// declared instead of wired: the buffer stores to capture at each command
+    /// boundary (rendered for display + typed image for live-restore, recorded
+    /// into `BufferHistoryState`). The caller still owns *which* states
+    /// participate; the kernel absorbs the mechanics — see
+    /// `KernelBuilder+Snapshot`. The kernel stays state-agnostic: the list is
+    /// erased to keys and names, never concrete types. Empty (the default)
+    /// means no snapshots; in release the sink is a no-op regardless.
     package func build(
         buffer: Buffer,
-        onError: @escaping @Sendable (_ error: any Error, _ symbol: String) async -> Void = { _, _ in },
-        onTrace: @escaping @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void = { _, _, _, _, _, _ in },
+        onError: (@Sendable (_ error: any Error, _ symbol: String) async -> Void)? = nil,
+        onTrace: (@Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void)? = nil,
+        monitor: MonitorOptions = MonitorOptions(),
         snapshotStates: [Any.Type] = []
     ) -> Kernel {
         Kernel(
             handlers: handlers,
             buffer: buffer,
-            errorSink: onError,
-            traceSink: onTrace,
-            snapshotSink: Self.snapshotSink(states: snapshotStates, buffer: buffer)
+            errorSink: onError ?? Self.defaultErrorSink(buffer: buffer),
+            traceSink: onTrace ?? Self.defaultTraceSink(buffer: buffer, cap: monitor.traceCap),
+            snapshotSink: Self.snapshotSink(states: snapshotStates, buffer: buffer, cap: monitor.snapshotCap)
         )
     }
 }

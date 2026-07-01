@@ -61,7 +61,23 @@ package final class BufferBuilder {
         stores[ObjectIdentifier(State.self)] = BufferStore(initial)
     }
 
-    package func build() -> Buffer { Buffer(stores: stores) }
+    /// Allocate only if the type has no store yet — the framework-default
+    /// seeding path used by `build()`, so an explicit caller `allocate`
+    /// (e.g. a pre-seeded state in a test) always stays authoritative.
+    func allocateIfAbsent<State>(_ initial: @autoclosure () -> State) {
+        let key = ObjectIdentifier(State.self)
+        if stores[key] == nil { stores[key] = BufferStore(initial()) }
+    }
+
+    /// Freeze the containers into a `Buffer`, after seeding the framework-owned
+    /// defaults: `KernelErrorState` (target of the default error sink — a
+    /// release feature, so unconditional) and, in DEBUG, the monitor states
+    /// (`MonitorDefaults`). Callers allocate only their own app states.
+    package func build() -> Buffer {
+        allocateIfAbsent(KernelErrorState())
+        allocateMonitorStates()
+        return Buffer(stores: stores)
+    }
 }
 
 // MARK: - Buffer
