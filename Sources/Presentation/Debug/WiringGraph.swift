@@ -144,13 +144,38 @@ private func repoRoot(from absolutePath: String) -> String? {
 
 /// The concrete-impl location for a symbol node (convention), anchored to the repo
 /// root taken from the node's own wire-site. `nil` for anonymous nodes or a miss.
+/// Line is the method's `func` declaration when found by convention, else 1.
 private func implLocation(for stage: WiringStage) -> SourceLocation? {
     guard let symbol = stage.symbol,
           let rel = implRelativePath(forSymbol: symbol),
           let site = stage.wireSite,
           let root = repoRoot(from: site.file)
     else { return nil }
-    return SourceLocation(file: "\(root)/\(rel)", line: 1)
+    let file = "\(root)/\(rel)"
+    let method = symbol.split(separator: ".").dropFirst(2).joined(separator: ".")
+    return SourceLocation(file: file, line: methodDeclarationLine(in: file, method: method) ?? 1)
+}
+
+/// The line of `func <method>`'s declaration in `file`, by convention (best-effort
+/// text search, not an AST parse). Comment lines are skipped so a docstring or a
+/// commented-out declaration mentioning the name can't produce a false hit.
+private func methodDeclarationLine(in file: String, method: String) -> Int? {
+    guard !method.isEmpty,
+          let text = try? String(contentsOfFile: file, encoding: .utf8),
+          let regex = try? NSRegularExpression(
+              pattern: #"^(?:(?:package|public|internal|fileprivate|private|open)\s+)*"#
+                  + #"(?:static\s+|final\s+|mutating\s+|nonisolated\s+)*func\s+"#
+                  + NSRegularExpression.escapedPattern(for: method) + #"\s*[(<]"#
+          )
+    else { return nil }
+    for (index, line) in text.components(separatedBy: .newlines).enumerated() {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.hasPrefix("//") else { continue }
+        if regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil {
+            return index + 1
+        }
+    }
+    return nil
 }
 
 private func fileName(_ path: String) -> String {
