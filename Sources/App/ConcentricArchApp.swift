@@ -7,6 +7,13 @@ import Infrastructure
 import Circuit
 import Driver
 import Presentation
+#if DEBUG
+// The kernel's dev tooling: monitor + wiring graph (KernelDebugUI, Kernel-only
+// dependency) and the swift-syntax-backed impl-location resolver, deliberately
+// a separate target so tooling consumers who skip impl jumps skip swift-syntax.
+import KernelDebugUI
+import KernelDebugUISyntaxTools
+#endif
 
 /// Promotes the process to a foreground GUI app at launch.
 ///
@@ -129,7 +136,15 @@ struct ConcentricArchApp: App {
                             note: intro.note
                         )
                     }
-                    WiringGraphWindow.toggle(pipelines: pipelines)
+                    // The conventions bundle: style defaults match this repo's
+                    // layers; the impl-jump resolver comes from the SyntaxTools
+                    // target (default `ImplSourceConventions` = this repo's layout).
+                    WiringGraphWindow.toggle(
+                        pipelines: pipelines,
+                        configuration: WiringGraphConfiguration(
+                            resolveImplLocation: makeImplLocationResolver()
+                        )
+                    )
                 }
                 .keyboardShortcut("w", modifiers: [.command, .option])
             }

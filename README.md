@@ -173,11 +173,27 @@ Release. Fencing them would fork `build()`'s signature across build
 configurations and contaminate the composition root; carrying a few dormant
 value types is the cheaper trade.
 
+The GUI side of the tooling — the kernel monitor and the wiring graph — is
+framework cargo too, and ships as two targets: `KernelDebugUI` (monitor +
+graph, depends on `Kernel` alone) and `KernelDebugUISyntaxTools` (the
+structural impl-location resolver behind the graph's "open the implementation"
+jump). SwiftPM has no per-configuration dependencies, so the resolver's
+swift-syntax dependency is quarantined behind its own target: a consumer who
+skips impl jumps never resolves or links swift-syntax at all (wire-site jumps
+are `#filePath`/`#line` captures — no parser needed; the graph just falls back
+to them when no resolver is injected). What the tooling knows about a
+repository — the `@callable` attribute name, the `Sources/<Layer>` layout,
+symbol-id decomposition, layer colours — is injected configuration
+(`ImplSourceConventions`, `WiringGraphConfiguration`), not baked in.
+
 ### The public contract
 
 `Sources/Kernel` is already written against its extraction: everything a
-consumer touches is `public` (the rest of this repo stays `package`), so the
-module's `public` surface *is* the framework's API, reviewable in place. That
+consumer touches is `public`, so the module's `public` surface *is* the
+framework's API, reviewable in place. The same stance covers the dev-tooling
+targets `KernelDebugUI` / `KernelDebugUISyntaxTools` — they extract with the
+kernel, so their consumer surface is `public` too. The app rings of this repo
+stay `package`. That
 surface includes the error vocabulary: `KernelError.unbound` /
 `.composeTypeMismatch` are the only failures the kernel itself throws from
 `call`/`compose`, and consumers may catch and switch over them. Types that are
