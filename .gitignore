@@ -24,6 +24,7 @@ package-lock.json
 
 # Claude Code (local settings, temporary files, agent state)
 .claude/
+CLAUDE.md
 
 # Xcode project file contains developer-specific signing config (DEVELOPMENT_TEAM, BUNDLE_IDENTIFIER)
 10slide.xcodeproj/project.pbxproj
