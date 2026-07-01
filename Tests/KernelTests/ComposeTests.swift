@@ -315,6 +315,53 @@ func forkBranchesAttachAsSiblingsUnderTheSharedParentSpan() async throws {
 }
 
 @Test
+func divertSplicesTheTargetPipesStagesAsSiblingsUnderTheSharedRootSpan() async throws {
+    // A composing handler whose own pipe diverts mid-flight into another pipe.
+    // `runStages` splices the diverted-to pipe's stages into the same loop
+    // without rebinding `Kernel.span`, so the diverted-to pipe's own symbol
+    // invokes must land as siblings under the *same* root span as the
+    // diverting pipe's own stages — structurally indistinguishable from two
+    // stages of one pipe. Card 25: the existing divert tests drove
+    // `kernel.compose` directly with no enclosing invoke (`Kernel.span` nil
+    // from the start), so this shared-root sibling shape was never verified.
+    let collector = TraceCollector()
+    let mainStage = Symbol<Int, Int>("test.divert.mainStage")
+    let altStage = Symbol<Int, Int>("test.divert.altStage")
+    let root = Symbol<Int, Int>("test.divert.root")
+
+    let kernel = await MainActor.run { () -> Kernel in
+        let builder = KernelBuilder()
+        builder.register(mainStage) { $0 + 1 }
+        builder.register(altStage) { $0 * 10 }
+        builder.register(root) { (k: Kernel, n: Int) async throws -> Int in
+            let alt = pipeline(altStage).seal()
+            return try await k.compose(
+                pipeline(mainStage)
+                    .pipe { (_, x: Int) -> Verb<Int> in .divert(Diversion(alt, x)) }
+                    .seal(),
+                n
+            )
+        }
+        return builder.build(
+            buffer: BufferBuilder().build(),
+            onTrace: { symbol, _, span, parent, _, _ in await collector.add(symbol, span, parent) }
+        )
+    }
+
+    let result = try await kernel.call(root, 5)
+    #expect(result == 60) // 5 -> +1 -> 6 -> divert -> *10 -> 60
+
+    let records = await collector.records
+    let rootRecord = try #require(records.first { $0.symbol == "test.divert.root" })
+    #expect(rootRecord.parent == nil) // the diverting pipe's own flow root
+
+    let mainRecord = try #require(records.first { $0.symbol == "test.divert.mainStage" })
+    let altRecord = try #require(records.first { $0.symbol == "test.divert.altStage" })
+    #expect(mainRecord.parent == rootRecord.span)
+    #expect(altRecord.parent == rootRecord.span) // sibling, not nested under a new span
+}
+
+@Test
 func traceStateRingTrimsToCapAndKeepsSequence() {
     var state = TraceState()
     let epoch = Date(timeIntervalSince1970: 0)
