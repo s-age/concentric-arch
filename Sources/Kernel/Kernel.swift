@@ -275,11 +275,16 @@ extension Kernel {
     /// command bus; later calls (selection moved to another flow) just swap in the
     /// new image. Re-stashing on a scrub would capture the *displayed past* as the
     /// present, so the stash is taken once and held until `exitTimeTravel`.
+    ///
+    /// Suspends and waits for the bus to go idle *before* capturing: a command
+    /// that was already running (or queued) when preview was entered still gets
+    /// to finish and write the buffer, and the stash reflects that write instead
+    /// of losing it to the following `restore`.
     @MainActor
-    package func previewTimeTravel(root: UUID, image: BufferImage) {
+    package func previewTimeTravel(root: UUID, image: BufferImage) async {
         if buffer.read(TimeTravelState.self).stashedPresent == nil {
+            await commands.suspendAndWaitUntilIdle()
             let present = buffer.capture(Set(image.keys))
-            commands.suspend()
             buffer.mutate(TimeTravelState.self) { $0.stashedPresent = present }
         }
         buffer.restore(image)

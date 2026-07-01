@@ -18,8 +18,9 @@ final class CommandBus: Sendable {
         let gate = self.gate
         Task {
             for await work in stream {
-                await gate.waitWhileSuspended()
+                await gate.beginWorkUnlessSuspended()
                 await work()
+                await gate.endWork()
             }
         }
     }
@@ -28,30 +29,62 @@ final class CommandBus: Sendable {
         continuation.yield(work)
     }
 
-    /// DEBUG time-travel: stop draining new commands so a restored past state isn't
-    /// clobbered while previewed. The command currently running (if any) finishes;
-    /// queued ones wait. Fire-and-forget — the suspend lands a turn later, which is
-    /// benign because preview also blocks user input.
-    func suspend() { Task { [gate] in await gate.set(suspended: true) } }
+    /// DEBUG time-travel: stop draining new commands and wait until any command
+    /// that was already running (or that starts in the window this races
+    /// against) has finished, so a `buffer.capture` taken right after this
+    /// returns can't miss a write still in flight. Queued-but-not-started
+    /// commands stay parked until `resumeDraining()`. Awaiting this (rather than
+    /// the old fire-and-forget suspend) is what closes the capture/suspend race.
+    func suspendAndWaitUntilIdle() async {
+        await gate.suspendAndWaitUntilIdle()
+    }
+
+    /// Resuming doesn't need to be awaited — nothing depends on it "having
+    /// landed" before the caller proceeds.
     func resumeDraining() { Task { [gate] in await gate.set(suspended: false) } }
 }
 
-/// Serializes the drain's pause flag and the waiters parked on it. An actor so
-/// `suspend`/`resume` and the drain's `waitWhileSuspended` can't race the flag.
+/// Serializes the drain's pause flag, the in-flight marker, and the waiters
+/// parked on either. An actor so the drain loop's begin/end-of-work bracket and
+/// `suspendAndWaitUntilIdle`'s check-then-wait can't race: each method flips its
+/// flag and inspects the other's without an intervening `await`, so whichever
+/// side reaches the actor first, the other sees a consistent picture — either
+/// the next item finds `suspended` already true and parks before running, or
+/// `suspendAndWaitUntilIdle` finds `isWorking` already true and waits for it.
 private actor PauseGate {
     private var suspended = false
-    private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var isWorking = false
+    private var resumeWaiters: [CheckedContinuation<Void, Never>] = []
+    private var idleWaiters: [CheckedContinuation<Void, Never>] = []
 
     func set(suspended value: Bool) {
         suspended = value
         if !value {
-            for waiter in waiters { waiter.resume() }
-            waiters.removeAll()
+            for waiter in resumeWaiters { waiter.resume() }
+            resumeWaiters.removeAll()
         }
     }
 
-    func waitWhileSuspended() async {
-        guard suspended else { return }
-        await withCheckedContinuation { waiters.append($0) }
+    /// Drain-loop bracket, called before each work item: parks while suspended,
+    /// then — with no `await` between the check and the flip — marks the item as
+    /// in flight so a concurrent `suspendAndWaitUntilIdle` can't miss it.
+    func beginWorkUnlessSuspended() async {
+        while suspended {
+            await withCheckedContinuation { resumeWaiters.append($0) }
+        }
+        isWorking = true
+    }
+
+    /// Drain-loop bracket, called once a work item returns.
+    func endWork() {
+        isWorking = false
+        for waiter in idleWaiters { waiter.resume() }
+        idleWaiters.removeAll()
+    }
+
+    func suspendAndWaitUntilIdle() async {
+        suspended = true
+        guard isWorking else { return }
+        await withCheckedContinuation { idleWaiters.append($0) }
     }
 }
