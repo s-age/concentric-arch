@@ -66,5 +66,13 @@ let package = Package(
         // Tests for the dispatch primitives — the load-bearing `compose` pipeline.
         .testTarget(name: "KernelTests", dependencies: ["Kernel"], path: "Tests/KernelTests"),
         .testTarget(name: "PresentationTests", dependencies: ["Presentation", "Contract"], path: "Tests/PresentationTests"),
+        // WiringTests: exhaustiveness smoke tests over the real Driver manifest —
+        // wires stub stores (keys only, never invoked) and cross-checks the derived
+        // bound-symbol set against the hand-maintained WiringIntrospection registry.
+        .testTarget(
+            name: "WiringTests",
+            dependencies: ["Kernel", "Contract", "Circuit", "Driver"],
+            path: "Tests/WiringTests"
+        ),
     ]
 )
