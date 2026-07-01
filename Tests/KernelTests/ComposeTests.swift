@@ -596,3 +596,19 @@ func symbolDescriptionFlowsIntoTheDescriptor() {
 
     #expect(pipe.descriptors.map(\.description) == ["doubles the input", nil])
 }
+
+@Test
+func divertsToNamesCandidateTargetsOnAnonymousVerbStages() {
+    // `.divert`'s actual target is runtime-decided and can't be derived, but an
+    // author can name candidates for the wiring graph to render as jump links.
+    let entry = pipeline(note: "maybe divert", divertsTo: ["Circuit.Slideshow.create"]) { (_, n: Int) -> Verb<Int> in .next(n) }
+        .pipe(note: "maybe divert too", divertsTo: ["Circuit.Slideshow.open", "Circuit.Slideshow.delete"]) { (_, n: Int) -> Verb<Int> in .next(n) }
+        .map { $0 + 1 } // .map never diverts — carries no divertsTo
+        .seal()
+
+    #expect(entry.descriptors.map(\.divertsTo) == [
+        ["Circuit.Slideshow.create"],
+        ["Circuit.Slideshow.open", "Circuit.Slideshow.delete"],
+        [],
+    ])
+}

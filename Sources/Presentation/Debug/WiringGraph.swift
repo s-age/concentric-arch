@@ -52,6 +52,11 @@ package struct WiringStage {
     /// (non-`.next` verb badges) — fork's fan-out is normal-path structure, not a
     /// warning annotation.
     var forkBranches: [[WiringStage]] = []
+    /// `.verb` only: dispatch keys this stage's author named as possible `.divert`
+    /// targets — never derived (the real target is runtime-decided), just an
+    /// author's hint. The graph renders each as a jump link when it resolves to a
+    /// known `WiringPipeline.key`, or a dim unresolved label otherwise.
+    let divertsTo: [String]
     /// Where this stage is wired in source (precise, from the builder). For an
     /// anonymous stage this is where its closure — the implementation — lives.
     let wireSite: SourceLocation?
@@ -67,6 +72,7 @@ package struct WiringStage {
         self.note = descriptor.description
         self.branches = []
         self.forkBranches = descriptor.branches.map { $0.map(WiringStage.init(descriptor:)) }
+        self.divertsTo = descriptor.divertsTo
         self.wireSite = descriptor.wireSite
     }
 }
@@ -216,6 +222,9 @@ struct WiringGraphView: View {
     @State private var mainLineOnly = false
     @State private var collapsed = false
     @State private var zoom: CGFloat = 1
+    /// Keys visited before the current one, most-recent-last — a plain back
+    /// stack (no forward/redo) for `divertsTo` jump links.
+    @State private var navigationHistory: [String] = []
 
     /// The introspected pipelines, injected by App (composition root) from the real
     /// Circuit pipes — this view does not depend on Circuit.
@@ -238,6 +247,27 @@ struct WiringGraphView: View {
 
     private var selectedPipeline: WiringPipeline? {
         pipelines.first { $0.key == selectedKey }
+    }
+
+    /// Dispatch key → title, so a `divertsTo` chip can show a human name instead
+    /// of the raw key — and so a stage can tell whether its named target actually
+    /// resolves to a pipeline in this catalog at all.
+    private var titlesByKey: [String: String] {
+        Dictionary(uniqueKeysWithValues: pipelines.map { ($0.key, $0.title) })
+    }
+
+    /// Follow a `divertsTo` jump link: stash the current key so "back" can
+    /// return to it, then switch the canvas to the target.
+    private func navigate(to key: String) {
+        if let current = selectedKey, current != key {
+            navigationHistory.append(current)
+        }
+        selectedKey = key
+    }
+
+    private func navigateBack() {
+        guard let previous = navigationHistory.popLast() else { return }
+        selectedKey = previous
     }
 
     var body: some View {
@@ -289,6 +319,11 @@ struct WiringGraphView: View {
 
     private func toolbar(_ pipeline: WiringPipeline) -> some View {
         HStack(spacing: 12) {
+            if !navigationHistory.isEmpty {
+                Button { navigateBack() } label: { Image(systemName: "chevron.backward") }
+                    .buttonStyle(.borderless)
+                    .help("Back to \(titlesByKey[navigationHistory.last ?? ""] ?? navigationHistory.last ?? "")")
+            }
             VStack(alignment: .leading, spacing: 1) {
                 Text(pipeline.title).font(.system(.headline, design: .monospaced))
                 Text(pipeline.key).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
@@ -328,15 +363,23 @@ struct WiringGraphView: View {
                         stage: stage,
                         isSelected: selectedStage == idx,
                         mainLineOnly: mainLineOnly,
-                        collapsed: collapsed
+                        collapsed: collapsed,
+                        titlesByKey: titlesByKey,
+                        onNavigate: navigate
                     )
-                    .onTapGesture { selectedStage = idx }
+                    // `simultaneousGesture`, not `.onTapGesture`: the latter is
+                    // exclusive and would swallow taps meant for the node's own
+                    // buttons (open-in-editor, divertsTo links) before they ever
+                    // fire.
+                    .simultaneousGesture(TapGesture().onEnded { selectedStage = idx })
                     if stage.kind == .fork, !mainLineOnly, !stage.forkBranches.isEmpty {
                         ForkBranchesView(
                             branches: stage.forkBranches,
                             entryType: idx == 0 ? pipeline.input : pipeline.stages[idx - 1].flows,
                             mainLineOnly: mainLineOnly,
-                            collapsed: collapsed
+                            collapsed: collapsed,
+                            titlesByKey: titlesByKey,
+                            onNavigate: navigate
                         )
                     }
                 }
@@ -477,6 +520,8 @@ private struct ForkBranchesView: View {
     let entryType: String
     let mainLineOnly: Bool
     let collapsed: Bool
+    let titlesByKey: [String: String]
+    let onNavigate: (String) -> Void
 
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
@@ -484,7 +529,14 @@ private struct ForkBranchesView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(stages.enumerated()), id: \.offset) { idx, stage in
                         FlowArrow(type: idx == 0 ? entryType : stages[idx - 1].flows)
-                        StageNodeView(stage: stage, isSelected: false, mainLineOnly: mainLineOnly, collapsed: collapsed)
+                        StageNodeView(
+                            stage: stage,
+                            isSelected: false,
+                            mainLineOnly: mainLineOnly,
+                            collapsed: collapsed,
+                            titlesByKey: titlesByKey,
+                            onNavigate: onNavigate
+                        )
                     }
                 }
             }
@@ -501,6 +553,8 @@ private struct StageNodeView: View {
     let isSelected: Bool
     let mainLineOnly: Bool
     let collapsed: Bool
+    let titlesByKey: [String: String]
+    let onNavigate: (String) -> Void
 
     private var isAnonymous: Bool { stage.symbol == nil }
     private var isCompact: Bool {
@@ -563,6 +617,9 @@ private struct StageNodeView: View {
                 ForEach(stage.branches, id: \.self) { branch in
                     Text(branch).font(.caption.weight(.medium)).foregroundStyle(.red)
                 }
+                ForEach(stage.divertsTo, id: \.self) { key in
+                    DivertLinkChip(targetKey: key, title: titlesByKey[key], onNavigate: onNavigate)
+                }
             }
         }
         .padding(14)
@@ -579,6 +636,36 @@ private struct StageNodeView: View {
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
         .frame(width: 360, alignment: .leading)
+    }
+}
+
+/// A `divertsTo` hint rendered as a jump link when `title` resolves (the key
+/// matches a `WiringPipeline` in this catalog), or as a dim, non-interactive
+/// label when it doesn't — an unresolved chip is a passive drift detector: the
+/// author named a target that no longer exists under that key.
+private struct DivertLinkChip: View {
+    let targetKey: String
+    let title: String?
+    let onNavigate: (String) -> Void
+
+    var body: some View {
+        if let title {
+            Button { onNavigate(targetKey) } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.triangle.branch")
+                    Text(title).font(.caption.weight(.medium))
+                }
+            }
+            .buttonStyle(.link)
+            .help("divert → \(targetKey)")
+        } else {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.branch")
+                Text(targetKey).font(.caption)
+            }
+            .foregroundStyle(.tertiary)
+            .help("divert → \(targetKey) (not found in this catalog — possibly stale)")
+        }
     }
 }
 

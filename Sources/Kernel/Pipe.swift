@@ -26,7 +26,9 @@ package struct SourceLocation: Sendable, Hashable {
 ///
 /// What is *not* here is what isn't static: the non-`.next` verbs a stage can emit
 /// (`.fail`/`.abort`/`.divert`) live inside opaque closures / bound Drivers, and the
-/// prose "what this part does" is a separate concern (symbol documentation).
+/// prose "what this part does" is a separate concern (symbol documentation). `.divert`
+/// gets one deliberate exception (`divertsTo`, below): its actual target is runtime-
+/// decided and can never be fully derived, but an author can still name the candidates.
 package struct StageDescriptor: Sendable {
     /// Which builder method minted the stage — its role in the pipe.
     package enum Kind: String, Sendable {
@@ -56,14 +58,21 @@ package struct StageDescriptor: Sendable {
     /// `.fork` only: each branch's own `descriptors` (it is a sub `Pipe`), in the
     /// order they were forked. Empty for every other kind.
     package let branches: [[StageDescriptor]]
+    /// `.verb` only: dispatch keys (`WiringPipeline.key` form) this stage *might*
+    /// `.divert` to, named by the author — unlike `branches`, this is not derived
+    /// (the actual target is decided by a runtime condition inside the closure, so
+    /// it can never be fully derived). Convention-level accuracy: a stale entry just
+    /// fails to resolve to a real pipeline at render time. Empty for every other kind.
+    package let divertsTo: [String]
 
-    package init(kind: Kind, symbolID: String?, flows: String, description: String? = nil, wireSite: SourceLocation? = nil, branches: [[StageDescriptor]] = []) {
+    package init(kind: Kind, symbolID: String?, flows: String, description: String? = nil, wireSite: SourceLocation? = nil, branches: [[StageDescriptor]] = [], divertsTo: [String] = []) {
         self.kind = kind
         self.symbolID = symbolID
         self.flows = flows
         self.description = description
         self.wireSite = wireSite
         self.branches = branches
+        self.divertsTo = divertsTo
     }
 }
 
@@ -151,14 +160,17 @@ package struct PipeBuilder<Input, Cursor> {
     /// kernel (to make its own calls) and the flowing value, and decides
     /// `.next`/`.abort`/`.divert`/`.fail`. Anonymous (no symbol), so it carries no
     /// description of its own — pass `note:` to label what this guard/rule does.
+    /// `divertsTo:` optionally names the dispatch key(s) this stage might `.divert`
+    /// to — the wiring graph renders them as jump links; see `StageDescriptor.divertsTo`.
     package func pipe<Next>(
         note: String? = nil,
+        divertsTo: [String] = [],
         file: String = #filePath,
         line: Int = #line,
         _ stage: @escaping @Sendable (Kernel, Cursor) async throws -> Verb<Next>
     ) -> PipeBuilder<Input, Next> {
         appending(PipeStage(
-            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(Next.self)", description: note, wireSite: SourceLocation(file: file, line: line)),
+            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(Next.self)", description: note, wireSite: SourceLocation(file: file, line: line), divertsTo: divertsTo),
             run: { kernel, value in try await stage(kernel, value as! Cursor).erased() }
         ))
     }
@@ -340,15 +352,18 @@ package func pipeline<P, O>(_ symbol: Symbol<P, O>, file: String = #filePath, li
 }
 
 /// Begin a pipeline with a verb-returning stage. Anonymous; pass `note:` to label it.
+/// `divertsTo:` optionally names the dispatch key(s) this stage might `.divert` to —
+/// see `StageDescriptor.divertsTo`.
 package func pipeline<P, O>(
     note: String? = nil,
+    divertsTo: [String] = [],
     file: String = #filePath,
     line: Int = #line,
     _ stage: @escaping @Sendable (Kernel, P) async throws -> Verb<O>
 ) -> PipeBuilder<P, O> {
     PipeBuilder<P, O>(
         stages: [PipeStage(
-            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(O.self)", description: note, wireSite: SourceLocation(file: file, line: line)),
+            descriptor: StageDescriptor(kind: .verb, symbolID: nil, flows: "\(O.self)", description: note, wireSite: SourceLocation(file: file, line: line), divertsTo: divertsTo),
             run: { kernel, value in try await stage(kernel, value as! P).erased() }
         )],
         inputType: "\(P.self)"
