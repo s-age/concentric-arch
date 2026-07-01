@@ -38,18 +38,29 @@ extension Verb {
 
 // MARK: - Diversion
 
-/// A fully-formed "jump target" for `.divert`: another pipe plus the payload to
-/// start it with, packaged so the running pipe needn't know its input type.
+/// A fully-formed "jump target" for `.divert`: another pipe's stages plus the
+/// payload to start it with, packaged so the running pipe needn't know its
+/// input type. Deliberately plain data (not a closure over `Kernel`) — this is
+/// what lets `compose`/`run` splice a diverted-to pipe straight into their own
+/// stage-iteration loop and keep going, rather than recursing into a nested
+/// `compose` call. A pipe that `.divert`s back to a pipe shaped like itself
+/// (an agent/stream-processing loop) costs O(1) stack frames this way, no
+/// matter how many hops the loop takes.
 ///
 /// The output is erased to `Any` here and re-checked at `compose`'s boundary,
 /// exactly like every other terminator — the diverted pipe's result is never
 /// consumed by an upstream stage, so there is no chain constraint to enforce.
-package struct Diversion: Sendable {
-    private let run: @Sendable (Kernel) async throws -> Any
+///
+/// `@unchecked Sendable`: same discipline as `Pipe` — `stages` is an array of
+/// `@Sendable` closures plus `Sendable` descriptors, and `payload`'s concrete
+/// type was pinned `Sendable` by the generic initializer before being erased
+/// to `Any` here.
+package struct Diversion: @unchecked Sendable {
+    let stages: [PipeStage]
+    let payload: Any
 
     package init<I: Sendable, O>(_ pipe: Pipe<I, O>, _ payload: I) {
-        self.run = { kernel in try await kernel.compose(pipe, payload) }
+        self.stages = pipe.stages
+        self.payload = payload
     }
-
-    func execute(_ kernel: Kernel) async throws -> Any { try await run(kernel) }
 }

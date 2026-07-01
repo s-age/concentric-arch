@@ -33,6 +33,7 @@ enum StageKind: String {
     case tap           // .tap(symbol)                 — side-effect, the value flows through
     case map           // .map(transform)              — pure projection
     case effect        // .effect { ... }              — effectful passthrough (a buffer write)
+    case fork          // .fork(...)                   — parallel fan-out, order-preserving join
 }
 
 /// One node: a single pipe stage. `symbol` is the dotted id it invokes
@@ -46,6 +47,11 @@ package struct WiringStage {
     let flows: String
     let note: String?
     var branches: [String] = []
+    /// `.fork` only: each branch's own stage list (it is a sub-pipe), in fork's
+    /// declared order. Empty for every other kind. Distinct from `branches` above
+    /// (non-`.next` verb badges) — fork's fan-out is normal-path structure, not a
+    /// warning annotation.
+    var forkBranches: [[WiringStage]] = []
     /// Where this stage is wired in source (precise, from the builder). For an
     /// anonymous stage this is where its closure — the implementation — lives.
     let wireSite: SourceLocation?
@@ -60,6 +66,7 @@ package struct WiringStage {
         self.flows = prettyType(descriptor.flows)
         self.note = descriptor.description
         self.branches = []
+        self.forkBranches = descriptor.branches.map { $0.map(WiringStage.init(descriptor:)) }
         self.wireSite = descriptor.wireSite
     }
 }
@@ -324,6 +331,14 @@ struct WiringGraphView: View {
                         collapsed: collapsed
                     )
                     .onTapGesture { selectedStage = idx }
+                    if stage.kind == .fork, !mainLineOnly, !stage.forkBranches.isEmpty {
+                        ForkBranchesView(
+                            branches: stage.forkBranches,
+                            entryType: idx == 0 ? pipeline.input : pipeline.stages[idx - 1].flows,
+                            mainLineOnly: mainLineOnly,
+                            collapsed: collapsed
+                        )
+                    }
                 }
             }
             .scaleEffect(zoom, anchor: .top)
@@ -351,6 +366,7 @@ struct WiringGraphView: View {
                     }
                     detailRow("payload", "\(input)  →  \(stage.flows)")
                     detailRow("emits", ([".next"] + stage.branches).joined(separator: "     "))
+                    if stage.kind == .fork { detailRow("branches", "\(stage.forkBranches.count)") }
                     if let note = stage.note { detailRow("description", note) }
                     if let impl = implLocation(for: stage) {
                         openRow("implementation", "\(fileName(impl.file))  (convention)", impl)
@@ -447,6 +463,33 @@ private struct FlowArrow: View {
             Text(type).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).lineLimit(1)
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// The nested fan-out under a `.fork` node: one vertical mini-flow per branch,
+/// side by side, each fed the same `entryType` (the value fork copies to every
+/// branch). Read-only — no selection/inspector wiring, unlike the main spine —
+/// but each branch's own `StageNodeView` still opens its wire-site/impl directly.
+/// The main spine's own `FlowArrow` below this (captioned with the fork's own
+/// `flows`, the joined tuple/array) is what visually reads as the rejoin.
+private struct ForkBranchesView: View {
+    let branches: [[WiringStage]]
+    let entryType: String
+    let mainLineOnly: Bool
+    let collapsed: Bool
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 20) {
+            ForEach(Array(branches.enumerated()), id: \.offset) { _, stages in
+                VStack(spacing: 0) {
+                    ForEach(Array(stages.enumerated()), id: \.offset) { idx, stage in
+                        FlowArrow(type: idx == 0 ? entryType : stages[idx - 1].flows)
+                        StageNodeView(stage: stage, isSelected: false, mainLineOnly: mainLineOnly, collapsed: collapsed)
+                    }
+                }
+            }
+        }
+        .padding(.top, 4)
     }
 }
 

@@ -36,6 +36,7 @@ package struct StageDescriptor: Sendable {
         case tap        // .tap(symbol)
         case map        // .map(transform)
         case effect     // .effect { ... }
+        case fork       // .fork(...)
     }
 
     package let kind: Kind
@@ -52,13 +53,17 @@ package struct StageDescriptor: Sendable {
     /// saga). For anonymous stages this is where the closure — the implementation —
     /// lives; the wiring graph opens it directly.
     package let wireSite: SourceLocation?
+    /// `.fork` only: each branch's own `descriptors` (it is a sub `Pipe`), in the
+    /// order they were forked. Empty for every other kind.
+    package let branches: [[StageDescriptor]]
 
-    package init(kind: Kind, symbolID: String?, flows: String, description: String? = nil, wireSite: SourceLocation? = nil) {
+    package init(kind: Kind, symbolID: String?, flows: String, description: String? = nil, wireSite: SourceLocation? = nil, branches: [[StageDescriptor]] = []) {
         self.kind = kind
         self.symbolID = symbolID
         self.flows = flows
         self.description = description
         self.wireSite = wireSite
+        self.branches = branches
     }
 }
 
@@ -203,6 +208,123 @@ package struct PipeBuilder<Input, Cursor> {
     package func seal() -> Pipe<Input, Cursor> { Pipe(stages: stages, inputType: inputType) }
 }
 
+// MARK: - Fork (parallel fan-out, `Promise.all`-style)
+
+extension PipeBuilder {
+    /// Fan the current value out to N independent branches (each a sealed sub
+    /// `Pipe` run via `kernel.compose`), run them concurrently, and collect
+    /// their results into an order-preserving tuple. `.map`/`.pipe` on the
+    /// tuple output is the "transistor" that recombines the branches — no
+    /// dedicated combinator is needed.
+    ///
+    /// Fail-fast via structured concurrency: `async let` cancels any
+    /// not-yet-awaited sibling the moment this closure's scope exits (whether
+    /// by returning or by throwing), so a failing branch stops the others
+    /// without extra bookkeeping. `(try await r1, try await r2)` awaits
+    /// left-to-right, so the propagated error is the first one *awaited*, not
+    /// necessarily the first one that failed in wall-clock time.
+    ///
+    /// Requires `Sendable` on `Cursor` and every `Ri`: unlike the sequential
+    /// stages above, this one actually crosses a concurrency boundary
+    /// (`async let`), so Swift must be able to prove the values are safe to
+    /// hand to a child task and back.
+    package func fork<R1: Sendable, R2: Sendable>(
+        _ b1: Pipe<Cursor, R1>,
+        _ b2: Pipe<Cursor, R2>,
+        note: String? = nil,
+        file: String = #filePath,
+        line: Int = #line
+    ) -> PipeBuilder<Input, (R1, R2)> where Cursor: Sendable {
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .fork, symbolID: nil, flows: "(\(R1.self), \(R2.self))", description: note, wireSite: SourceLocation(file: file, line: line), branches: [b1.descriptors, b2.descriptors]),
+            run: { kernel, value in
+                let cursor = value as! Cursor
+                async let r1 = kernel.compose(b1, cursor)
+                async let r2 = kernel.compose(b2, cursor)
+                return .next((try await r1, try await r2))
+            }
+        ))
+    }
+
+    /// Three-branch overload — see the two-branch `fork` for the shared design notes.
+    package func fork<R1: Sendable, R2: Sendable, R3: Sendable>(
+        _ b1: Pipe<Cursor, R1>,
+        _ b2: Pipe<Cursor, R2>,
+        _ b3: Pipe<Cursor, R3>,
+        note: String? = nil,
+        file: String = #filePath,
+        line: Int = #line
+    ) -> PipeBuilder<Input, (R1, R2, R3)> where Cursor: Sendable {
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .fork, symbolID: nil, flows: "(\(R1.self), \(R2.self), \(R3.self))", description: note, wireSite: SourceLocation(file: file, line: line), branches: [b1.descriptors, b2.descriptors, b3.descriptors]),
+            run: { kernel, value in
+                let cursor = value as! Cursor
+                async let r1 = kernel.compose(b1, cursor)
+                async let r2 = kernel.compose(b2, cursor)
+                async let r3 = kernel.compose(b3, cursor)
+                return .next((try await r1, try await r2, try await r3))
+            }
+        ))
+    }
+
+    /// Four-branch overload — see the two-branch `fork` for the shared design notes.
+    package func fork<R1: Sendable, R2: Sendable, R3: Sendable, R4: Sendable>(
+        _ b1: Pipe<Cursor, R1>,
+        _ b2: Pipe<Cursor, R2>,
+        _ b3: Pipe<Cursor, R3>,
+        _ b4: Pipe<Cursor, R4>,
+        note: String? = nil,
+        file: String = #filePath,
+        line: Int = #line
+    ) -> PipeBuilder<Input, (R1, R2, R3, R4)> where Cursor: Sendable {
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .fork, symbolID: nil, flows: "(\(R1.self), \(R2.self), \(R3.self), \(R4.self))", description: note, wireSite: SourceLocation(file: file, line: line), branches: [b1.descriptors, b2.descriptors, b3.descriptors, b4.descriptors]),
+            run: { kernel, value in
+                let cursor = value as! Cursor
+                async let r1 = kernel.compose(b1, cursor)
+                async let r2 = kernel.compose(b2, cursor)
+                async let r3 = kernel.compose(b3, cursor)
+                async let r4 = kernel.compose(b4, cursor)
+                return .next((try await r1, try await r2, try await r3, try await r4))
+            }
+        ))
+    }
+
+    /// Homogeneous, unbounded fan-out: same branch type repeated N times,
+    /// collected into an order-preserving array. Escape hatch for arities
+    /// beyond the tuple overloads above (2...4) or a true variable-length
+    /// fan-out. `async let` can't express a dynamic arity, so this uses
+    /// `withThrowingTaskGroup` instead — each child tags its result with its
+    /// index so the array can be reassembled in submission order regardless
+    /// of completion order. A child's throw cancels the rest of the group and
+    /// propagates once the group finishes unwinding (the same structured-
+    /// concurrency guarantee the tuple overloads get from `async let`).
+    package func fork<R: Sendable>(
+        _ branches: [Pipe<Cursor, R>],
+        note: String? = nil,
+        file: String = #filePath,
+        line: Int = #line
+    ) -> PipeBuilder<Input, [R]> where Cursor: Sendable {
+        appending(PipeStage(
+            descriptor: StageDescriptor(kind: .fork, symbolID: nil, flows: "[\(R.self)]", description: note, wireSite: SourceLocation(file: file, line: line), branches: branches.map(\.descriptors)),
+            run: { kernel, value in
+                let cursor = value as! Cursor
+                let results = try await withThrowingTaskGroup(of: (Int, R).self) { group -> [R] in
+                    for (index, branch) in branches.enumerated() {
+                        group.addTask { (index, try await kernel.compose(branch, cursor)) }
+                    }
+                    var collected = [R?](repeating: nil, count: branches.count)
+                    for try await (index, result) in group {
+                        collected[index] = result
+                    }
+                    return collected.map { $0! }
+                }
+                return .next(results)
+            }
+        ))
+    }
+}
+
 // MARK: - Entry points
 
 /// Begin a pipeline with a leaf symbol. The pipe's `Input` is the symbol's
@@ -236,25 +358,42 @@ package func pipeline<P, O>(
 // MARK: - Running
 
 extension Kernel {
-    /// Run a sealed pipe: thread `payload` through each stage, interpreting the
-    /// verb it returns. `.next` hands the value to the next stage; `.abort`
-    /// returns it; `.divert` runs the other pipe and returns that; `.fail`
-    /// throws. Falling off the end returns the last `.next` value.
-    package func compose<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws -> O {
-        var value: Any = payload
-        for stage in pipe.stages {
-            switch try await stage.run(self, value) {
+    /// Thread `payload` through `stages`, interpreting each verb. `.next` hands
+    /// the value to the next stage; `.abort` returns it; `.fail` throws.
+    /// `.divert` **replaces** `stages`/`value` with the target pipe's own and
+    /// restarts from its first stage — an iteration, not a recursive `compose`
+    /// call. That is the whole point: a pipe that ends by diverting back to a
+    /// pipe shaped like itself (an agent loop, a stream-processing loop) costs
+    /// O(1) stack frames no matter how many hops it takes, because there is
+    /// never a nested async call to unwind — each hop discards the previous
+    /// one's stage list outright rather than waiting on it.
+    private func runStages(_ initialStages: [PipeStage], _ initialPayload: Any) async throws -> Any {
+        var stages = initialStages
+        var value = initialPayload
+        var index = 0
+        while index < stages.count {
+            switch try await stages[index].run(self, value) {
             case .next(let forward):
                 value = forward
+                index += 1
             case .abort(let result):
-                return try composeCast(result, to: O.self)
+                return result
             case .divert(let diversion):
-                return try composeCast(await diversion.execute(self), to: O.self)
+                stages = diversion.stages
+                value = diversion.payload
+                index = 0
             case .fail(let error):
                 throw error
             }
         }
-        return try composeCast(value, to: O.self)
+        return value
+    }
+
+    /// Run a sealed pipe and cast its final (or `.abort`/diverted-to) value to
+    /// the pipe's declared `Output` — the single boundary cast every terminator
+    /// passes through exactly once.
+    package func compose<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws -> O {
+        try await composeCast(runStages(pipe.stages, payload), to: O.self)
     }
 
     /// Convenience: seal and run a builder in one step.
@@ -269,15 +408,7 @@ extension Kernel {
     /// returned, `.abort`/`.divert` carry no output type and the boundary cast
     /// that `compose` performs disappears entirely.
     package func run<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws {
-        var value: Any = payload
-        for stage in pipe.stages {
-            switch try await stage.run(self, value) {
-            case .next(let forward): value = forward
-            case .abort: return
-            case .divert(let diversion): _ = try await diversion.execute(self); return
-            case .fail(let error): throw error
-            }
-        }
+        _ = try await runStages(pipe.stages, payload)
     }
 
     /// Convenience: seal and forward-drive a builder in one step.
@@ -287,12 +418,13 @@ extension Kernel {
 
     /// Interpret a single verb down to a typed result — the terminal step shared
     /// by `call` (a one-stage pipe) and `compose`'s terminators. `.next`/`.abort`
-    /// yield their value; `.divert` runs the other pipe; `.fail` throws.
+    /// yield their value; `.divert` runs the other pipe (via the same iterative
+    /// `runStages`, so a diverted-to loop is still O(1) stack); `.fail` throws.
     func interpret<O>(_ verb: Verb<Any>, as _: O.Type) async throws -> O {
         switch verb {
         case .next(let forward): return try composeCast(forward, to: O.self)
         case .abort(let result): return try composeCast(result, to: O.self)
-        case .divert(let diversion): return try composeCast(await diversion.execute(self), to: O.self)
+        case .divert(let diversion): return try composeCast(await runStages(diversion.stages, diversion.payload), to: O.self)
         case .fail(let error): throw error
         }
     }
