@@ -23,18 +23,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 }
 
-#if DEBUG
-/// Multi-line, indented reflection of a value for the monitor's Buffer tab.
-/// `dump` walks the value with `Mirror`, so it needs no `Codable`/`CustomString`
-/// conformance — it pretty-prints any app state as-is, which is why the
-/// snapshot sink keeps strings (rendered here) rather than typed values.
-private func prettyDump(_ value: Any) -> String {
-    var text = ""
-    dump(value, to: &text)
-    return text
-}
-#endif
-
 @main
 struct ConcentricArchApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
@@ -99,40 +87,14 @@ struct ConcentricArchApp: App {
                     }
                     #endif
                 },
-                // State side of time-travel: at each command boundary (flow root)
-                // render the app-state stores to text and append to the snapshot ring.
-                // App owns the store list — the kernel stays state-agnostic, exactly
-                // as it does for the error and trace sinks. `TraceState`/
-                // `BufferHistoryState` are deliberately excluded (the trace and the
-                // history are not part of the world we rewind).
-                onSnapshot: { root, at in
-                    #if DEBUG
-                    // One main-actor hop: read the app-state stores, render them for
-                    // display *and* keep an erased typed copy for live-restore. Both
-                    // are built here so the non-Sendable `image` never leaves the
-                    // main actor. `TraceState`/`BufferHistoryState`/`TimeTravelState`
-                    // are excluded — the trace, the history, and the preview flag are
-                    // not part of the world we rewind.
-                    await MainActor.run {
-                        let library = buffer.read(LibraryState.self)
-                        let openSlideshow = buffer.read(SlideshowState.self)
-                        let appError = buffer.read(AppErrorState.self)
-                        let dumps = [
-                            StoreDump(name: "\(LibraryState.self)", value: prettyDump(library)),
-                            StoreDump(name: "\(SlideshowState.self)", value: prettyDump(openSlideshow)),
-                            StoreDump(name: "\(AppErrorState.self)", value: prettyDump(appError)),
-                        ]
-                        let image: BufferImage = [
-                            ObjectIdentifier(LibraryState.self): library,
-                            ObjectIdentifier(SlideshowState.self): openSlideshow,
-                            ObjectIdentifier(AppErrorState.self): appError,
-                        ]
-                        buffer.mutate(BufferHistoryState.self) {
-                            $0.record(root: root, stores: dumps, image: image, at: at, cap: 100)
-                        }
-                    }
-                    #endif
-                }
+                // State side of time-travel: which stores each command-boundary
+                // snapshot captures (rendered for the monitor + typed image for
+                // live-restore). App still owns the list — the kernel absorbs the
+                // read/render/record mechanics and stays state-agnostic.
+                // `TraceState`/`BufferHistoryState`/`TimeTravelState` are simply
+                // not listed: the trace, the history, and the preview flag are not
+                // part of the world we rewind.
+                snapshotStates: [LibraryState.self, SlideshowState.self, AppErrorState.self]
             )
         } catch {
             fatalError("Initialization failed: \(error)")

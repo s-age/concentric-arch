@@ -102,17 +102,30 @@ package final class KernelBuilder {
     /// error state, so the kernel routes errors through the buffer without
     /// knowing the concrete error-state type. `symbol` is the id of the
     /// dispatched command that failed — the caller already holds it, so it
-    /// travels alongside the error rather than being dropped. `onTrace` and
-    /// `onSnapshot` are the DEBUG monitor sinks: the App wires them to record
-    /// spans and per-flow-root snapshots without the kernel knowing anything
-    /// about the monitor's concrete state types.
+    /// travels alongside the error rather than being dropped. `onTrace` is the
+    /// DEBUG trace sink: the App wires it to record spans without the kernel
+    /// knowing anything about the monitor's concrete state types.
+    /// `snapshotStates` is the state side of time-travel, declared instead of
+    /// wired: the buffer stores to capture at each command boundary (rendered
+    /// for display + typed image for live-restore, recorded into
+    /// `BufferHistoryState`). The caller still owns *which* states participate;
+    /// the kernel absorbs the mechanics — see `KernelBuilder+Snapshot`. The
+    /// kernel stays state-agnostic: the list is erased to keys and names, never
+    /// concrete types. Empty (the default) means no snapshots; in release the
+    /// sink is a no-op regardless.
     package func build(
         buffer: Buffer,
         onError: @escaping @Sendable (_ error: any Error, _ symbol: String) async -> Void = { _, _ in },
         onTrace: @escaping @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void = { _, _, _, _, _, _ in },
-        onSnapshot: @escaping @Sendable (_ root: UUID, _ at: Date) async -> Void = { _, _ in }
+        snapshotStates: [Any.Type] = []
     ) -> Kernel {
-        Kernel(handlers: handlers, buffer: buffer, errorSink: onError, traceSink: onTrace, snapshotSink: onSnapshot)
+        Kernel(
+            handlers: handlers,
+            buffer: buffer,
+            errorSink: onError,
+            traceSink: onTrace,
+            snapshotSink: Self.snapshotSink(states: snapshotStates, buffer: buffer)
+        )
     }
 }
 
@@ -147,10 +160,11 @@ package final class Kernel: Sendable {
     /// contaminate the App call site.
     let traceSink: @Sendable (_ symbol: String, _ verb: TraceVerb, _ span: UUID, _ parent: UUID?, _ payload: String?, _ at: Date) async -> Void
     /// Where a flow root's resulting buffer state is captured (DEBUG only) —
-    /// wired by App to render the app-state stores into the buffer's
-    /// `BufferHistoryState`. Fires once per flow root (`parent == nil`), after the
-    /// command has settled, tagged with the root `span` so the monitor joins each
-    /// snapshot to the trace forest. No-op by default — release pays nothing.
+    /// synthesized by `build(snapshotStates:)` to render the declared stores
+    /// into the buffer's `BufferHistoryState`. Fires once per flow root
+    /// (`parent == nil`), after the command has settled, tagged with the root
+    /// `span` so the monitor joins each snapshot to the trace forest. No-op when
+    /// no states are declared — and always in release, so release pays nothing.
     /// Unfenced for the same reason as `traceSink`.
     let snapshotSink: @Sendable (_ root: UUID, _ at: Date) async -> Void
 
