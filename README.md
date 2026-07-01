@@ -173,6 +173,29 @@ Release. Fencing them would fork `build()`'s signature across build
 configurations and contaminate the composition root; carrying a few dormant
 value types is the cheaper trade.
 
+### The public contract
+
+`Sources/Kernel` is already written against its extraction: everything a
+consumer touches is `public` (the rest of this repo stays `package`), so the
+module's `public` surface *is* the framework's API, reviewable in place. That
+surface includes the error vocabulary: `KernelError.unbound` /
+`.composeTypeMismatch` are the only failures the kernel itself throws from
+`call`/`compose`, and consumers may catch and switch over them. Types that are
+deliberately **not** part of the contract stay `internal`: `CommandBus`,
+`PipeStage`, and `Pipe.init` (pipes are built only through `PipeBuilder` /
+`pipeline(…)`).
+
+Two facts the extracted package must carry with it:
+
+- **Platform floor.** The package manifest must re-declare
+  `platforms: [.macOS(.v15)]` (or the then-current equivalent): the kernel
+  assumes `@Observable` and modern Swift concurrency throughout.
+- **Not "Foundation only".** This is part of the value proposition, not a
+  caveat: `Buffer` imports `Observation` and is `@MainActor` by design — the
+  shared memory is *observable UI state*, so SwiftUI re-renders from a buffer
+  write with no adapter layer. A consumer who wants a headless, off-main state
+  region is outside this framework's thesis.
+
 ## License
 
 [MIT](LICENSE) © s-age

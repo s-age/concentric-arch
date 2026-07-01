@@ -3,7 +3,7 @@ import Foundation
 // The framework-provided default error channel — the state side of `dispatch`'s
 // error sink. A failure inside a fire-and-forget command has no return path to
 // `catch`; unless the app injects its own `onError` at `build`, the default
-// sink renders the failure here and Presentation observes it like any other
+// sink renders the failure here and the view layer observes it like any other
 // state. `BufferBuilder.build()` allocates the store unconditionally (errors
 // are a release feature, unlike the DEBUG monitor states), so the default sink
 // can never hit a missing allocation.
@@ -14,10 +14,10 @@ import Foundation
 /// written as `"symbol: description"`, cleared by whoever displays it. An app
 /// that wants a richer error shape keeps the classic route — allocate its own
 /// state and inject `onError` at `build`; this store then just sits unused.
-package struct KernelErrorState: Sendable {
-    package var message: String?
+public struct KernelErrorState: Sendable {
+    public var message: String?
 
-    package init(message: String? = nil) {
+    public init(message: String? = nil) {
         self.message = message
     }
 }

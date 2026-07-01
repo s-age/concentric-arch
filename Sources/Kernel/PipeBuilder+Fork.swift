@@ -20,7 +20,7 @@ extension PipeBuilder {
     /// stages in `PipeBuilder.swift`, this one actually crosses a concurrency
     /// boundary (`async let`), so Swift must be able to prove the values are
     /// safe to hand to a child task and back.
-    package func fork<R1: Sendable, R2: Sendable>(
+    public func fork<R1: Sendable, R2: Sendable>(
         _ b1: Pipe<Cursor, R1>,
         _ b2: Pipe<Cursor, R2>,
         note: String? = nil,
@@ -39,7 +39,7 @@ extension PipeBuilder {
     }
 
     /// Three-branch overload — see the two-branch `fork` for the shared design notes.
-    package func fork<R1: Sendable, R2: Sendable, R3: Sendable>(
+    public func fork<R1: Sendable, R2: Sendable, R3: Sendable>(
         _ b1: Pipe<Cursor, R1>,
         _ b2: Pipe<Cursor, R2>,
         _ b3: Pipe<Cursor, R3>,
@@ -60,7 +60,7 @@ extension PipeBuilder {
     }
 
     /// Four-branch overload — see the two-branch `fork` for the shared design notes.
-    package func fork<R1: Sendable, R2: Sendable, R3: Sendable, R4: Sendable>(
+    public func fork<R1: Sendable, R2: Sendable, R3: Sendable, R4: Sendable>(
         _ b1: Pipe<Cursor, R1>,
         _ b2: Pipe<Cursor, R2>,
         _ b3: Pipe<Cursor, R3>,
@@ -91,7 +91,7 @@ extension PipeBuilder {
     /// of completion order. A child's throw cancels the rest of the group and
     /// propagates once the group finishes unwinding (the same structured-
     /// concurrency guarantee the tuple overloads get from `async let`).
-    package func fork<R: Sendable>(
+    public func fork<R: Sendable>(
         _ branches: [Pipe<Cursor, R>],
         note: String? = nil,
         file: String = #filePath,

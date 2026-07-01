@@ -37,12 +37,12 @@ extension Kernel {
     /// Run a sealed pipe and cast its final (or `.abort`/diverted-to) value to
     /// the pipe's declared `Output` — the single boundary cast every terminator
     /// passes through exactly once.
-    package func compose<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws -> O {
+    public func compose<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws -> O {
         try await composeCast(runStages(pipe.stages, payload), to: O.self)
     }
 
     /// Convenience: seal and run a builder in one step.
-    package func compose<I, O>(_ builder: PipeBuilder<I, O>, _ payload: I) async throws -> O {
+    public func compose<I, O>(_ builder: PipeBuilder<I, O>, _ payload: I) async throws -> O {
         try await compose(builder.seal(), payload)
     }
 
@@ -52,12 +52,12 @@ extension Kernel {
     /// `.next`/`.abort`/`.divert`/`.fail` steer the flow. Because nothing is
     /// returned, `.abort`/`.divert` carry no output type and the boundary cast
     /// that `compose` performs disappears entirely.
-    package func run<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws {
+    public func run<I, O>(_ pipe: Pipe<I, O>, _ payload: I) async throws {
         _ = try await runStages(pipe.stages, payload)
     }
 
     /// Convenience: seal and forward-drive a builder in one step.
-    package func run<I, O>(_ builder: PipeBuilder<I, O>, _ payload: I) async throws {
+    public func run<I, O>(_ builder: PipeBuilder<I, O>, _ payload: I) async throws {
         try await run(builder.seal(), payload)
     }
 

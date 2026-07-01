@@ -9,15 +9,15 @@ import Observation
 /// `Buffer` is keyed by the state's *type*, so there is exactly one
 /// `BufferStore` per state type. A SwiftUI view (or `@Observable` view model)
 /// that reads `value` during body evaluation is re-rendered when it changes —
-/// this is the "read-only, observable" side that Presentation sees.
+/// this is the "read-only, observable" side the view layer sees.
 ///
-/// The value is `fileprivate(set)`: only `Buffer.write` (same file) mutates it,
-/// which keeps Presentation from writing while still being a plain stored
+/// The value is `fileprivate(set)`: only `Buffer.mutate` (same file) mutates it,
+/// which keeps the view layer from writing while still being a plain stored
 /// property the Observation macro can track.
 @MainActor
 @Observable
-package final class BufferStore<State> {
-    package fileprivate(set) var value: State
+public final class BufferStore<State> {
+    public fileprivate(set) var value: State
     fileprivate init(_ value: State) { self.value = value }
 }
 
@@ -42,22 +42,22 @@ extension BufferStore: AnyBufferStore {
 /// An erased copy of selected buffer cells — one captured value per store type.
 /// Non-`Sendable` (`Any`) and only ever produced/consumed on the main actor, so
 /// it never crosses actors. Used to stash the present and write back the past.
-package typealias BufferImage = [ObjectIdentifier: Any]
+public typealias BufferImage = [ObjectIdentifier: Any]
 
 // MARK: - Builder
 
 /// Collects the buffer's named containers during app wiring — the state-side
-/// counterpart of `KernelBuilder`. Drivers/`App` `allocate` a container per
-/// state type; once wiring is done, `build()` freezes them into a `Buffer`.
+/// counterpart of `KernelBuilder`. The composition root `allocate`s a container
+/// per state type; once wiring is done, `build()` freezes them into a `Buffer`.
 @MainActor
-package final class BufferBuilder {
+public final class BufferBuilder {
     fileprivate var stores: [ObjectIdentifier: AnyObject] = [:]
 
-    package init() {}
+    public init() {}
 
     /// Allocate a named container, keyed by its `State` type, seeded with an
     /// initial value. The type *is* the key — there is one store per type.
-    package func allocate<State>(_ initial: State) {
+    public func allocate<State>(_ initial: State) {
         stores[ObjectIdentifier(State.self)] = BufferStore(initial)
     }
 
@@ -73,7 +73,7 @@ package final class BufferBuilder {
     /// defaults: `KernelErrorState` (target of the default error sink — a
     /// release feature, so unconditional) and, in DEBUG, the monitor states
     /// (`MonitorDefaults`). Callers allocate only their own app states.
-    package func build() -> Buffer {
+    public func build() -> Buffer {
         allocateIfAbsent(KernelErrorState())
         allocateMonitorStates()
         return Buffer(stores: stores)
@@ -85,15 +85,15 @@ package final class BufferBuilder {
 /// A type-keyed registry of observable `Store`s — the "typed Redux" region.
 ///
 /// Mental model: each state type names one Store (single source of truth).
-/// Non-Presentation layers (Circuit/Compute/Infrastructure), which hold the
-/// kernel, `write` new values; Presentation only `read`s (observably). `Buffer`
-/// is the dumb mechanism — any transition logic belongs in `Compute`.
+/// The layers that hold the kernel write new values; the view layer only
+/// `read`s (observably). `Buffer` is the dumb mechanism — any transition logic
+/// belongs in the caller's pure-logic layer.
 ///
 /// `@MainActor` because SwiftUI observes synchronously; the dispatch core
 /// (`Kernel.call`) stays off the main actor, so writers hop here only at the
 /// moment they commit a value.
 @MainActor
-package final class Buffer {
+public final class Buffer {
     private let stores: [ObjectIdentifier: AnyObject]
 
     fileprivate init(stores: [ObjectIdentifier: AnyObject]) {
@@ -110,7 +110,7 @@ package final class Buffer {
     /// Read the current value. Called inside a SwiftUI `body` (directly or via an
     /// `@Observable` view model's computed property), it registers an observation
     /// dependency, so the view re-renders on the next `write`.
-    package func read<State>(_ type: State.Type) -> State {
+    public func read<State>(_ type: State.Type) -> State {
         store(type).value
     }
 
@@ -121,13 +121,13 @@ package final class Buffer {
     /// `mutate` runs the whole read-modify-write as one synchronous main-actor
     /// critical section, so concurrent *additive / targeted* mutations (append,
     /// replace-by-id, remove-by-id) cannot lose each other. Writers are the
-    /// non-Presentation layers that hold the kernel.
+    /// layers that hold the kernel — never the view layer.
     ///
     /// `mutate` does **not** make a snapshot-then-apply-after-I/O sequence safe
     /// (e.g. a full list reload): a mutation landing during the I/O window can
     /// still be overwritten by the stale snapshot. That is a serialization
-    /// concern, not an atomicity one — see `fetchSlideshows`.
-    package func mutate<State>(_ type: State.Type, _ transform: (inout State) -> Void) {
+    /// concern, not an atomicity one.
+    public func mutate<State>(_ type: State.Type, _ transform: (inout State) -> Void) {
         transform(&store(type).value)
     }
 
@@ -136,7 +136,7 @@ package final class Buffer {
     /// Erased copy of the named cells' current values. The caller picks which
     /// stores (app state only — never `TraceState`/history, which must survive
     /// a rewind). Returns one entry per key whose store exists.
-    package func capture(_ keys: Set<ObjectIdentifier>) -> BufferImage {
+    public func capture(_ keys: Set<ObjectIdentifier>) -> BufferImage {
         var image: BufferImage = [:]
         for key in keys {
             if let cell = stores[key] as? AnyBufferStore { image[key] = cell.captureValue() }
@@ -147,7 +147,7 @@ package final class Buffer {
     /// Write an erased image back into the matching cells. Each write hits the
     /// `@Observable` value, so SwiftUI re-renders — this is what makes the live app
     /// reflect the past. Only the keys present in `image` are touched.
-    package func restore(_ image: BufferImage) {
+    public func restore(_ image: BufferImage) {
         for (key, value) in image {
             (stores[key] as? AnyBufferStore)?.restoreValue(value)
         }

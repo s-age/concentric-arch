@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Trace
 
 /// The verb a handler resolved to — the control decision, captured as data.
-package enum TraceVerb: String, Sendable {
+public enum TraceVerb: String, Sendable {
     case next, abort, divert, fail
 
     init(_ verb: Verb<Any>) {
@@ -21,33 +21,33 @@ package enum TraceVerb: String, Sendable {
 /// state — a bounded log the monitor reads (DEBUG only). `id` is a monotonic
 /// sequence assigned on record (record order); `span`/`parent` are the tree
 /// identity, independent of `id`. `parent == nil` marks a flow root.
-package struct TraceEntry: Sendable, Identifiable {
-    package let id: Int
-    package let symbol: String
-    package let verb: TraceVerb
+public struct TraceEntry: Sendable, Identifiable {
+    public let id: Int
+    public let symbol: String
+    public let verb: TraceVerb
     /// Identity of this invoke node — the span the kernel opened for it.
-    package let span: UUID
+    public let span: UUID
     /// The enclosing invoke's span, or `nil` if this is a flow root. Lets the
     /// monitor rebuild the call tree the stack would have given for free.
-    package let parent: UUID?
+    public let parent: UUID?
     /// Rendered input payload, or `nil` when capture was toggled off at record
     /// time. Output is not recorded: forward-only means a node's output is the
     /// next node's input, so it is read off the successor. See `Kernel.recordsInspection`.
-    package let payload: String?
-    package let timestamp: Date
+    public let payload: String?
+    public let timestamp: Date
 }
 
 /// Bounded ring of recent invocations, held in `kernel.buffer` so the monitor
 /// observes it like any other state. `record` appends and drops the oldest in
 /// batches, keeping the window within [`cap`, `cap` × 1.25] — the trace is a
 /// window, not a transcript, so exact-`cap` precision buys nothing.
-package struct TraceState: Sendable {
-    package private(set) var entries: [TraceEntry] = []
+public struct TraceState: Sendable {
+    public private(set) var entries: [TraceEntry] = []
     private var nextID = 0
 
-    package init() {}
+    public init() {}
 
-    package mutating func record(symbol: String, verb: TraceVerb, span: UUID, parent: UUID?, payload: String?, at timestamp: Date, cap: Int) {
+    public mutating func record(symbol: String, verb: TraceVerb, span: UUID, parent: UUID?, payload: String?, at timestamp: Date, cap: Int) {
         entries.append(TraceEntry(id: nextID, symbol: symbol, verb: verb, span: span, parent: parent, payload: payload, timestamp: timestamp))
         nextID += 1
         // removeFirst shifts the whole array (O(cap)); paying that per record once
@@ -57,7 +57,7 @@ package struct TraceState: Sendable {
         if overflow > cap / 4 { entries.removeFirst(overflow) }
     }
 
-    package mutating func clear() {
+    public mutating func clear() {
         entries.removeAll()
     }
 }
@@ -67,11 +67,11 @@ package struct TraceState: Sendable {
 /// One node of the call forest rebuilt from the flat trace: an entry, the flow
 /// root it belongs to, and the entries invoked under it. `children` is `nil` at a
 /// leaf (so a hierarchical view shows no disclosure there). Built by `forest`.
-package struct TraceTree: Identifiable, Sendable {
-    package let entry: TraceEntry
-    package let root: UUID
-    package let children: [TraceTree]?
-    package var id: Int { entry.id }
+public struct TraceTree: Identifiable, Sendable {
+    public let entry: TraceEntry
+    public let root: UUID
+    public let children: [TraceTree]?
+    public var id: Int { entry.id }
 }
 
 extension TraceState {
@@ -86,7 +86,7 @@ extension TraceState {
     /// Order: flows newest-first by the highest id anywhere in the tree; siblings
     /// in call order (ascending id). A `visited` set guards a malformed cycle —
     /// the trace is acyclic by construction, but this reads a live partial ring.
-    package var forest: [TraceTree] {
+    public var forest: [TraceTree] {
         let present = Set(entries.map(\.span))
         var childrenBySpan: [UUID: [TraceEntry]] = [:]
         var roots: [TraceEntry] = []
