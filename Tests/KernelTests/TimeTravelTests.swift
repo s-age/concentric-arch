@@ -13,7 +13,6 @@ private struct Counter { var n: Int }
 func timeTravelScrubsBetweenPastsThenRestoresPresentOnExit() async {
     let bufferBuilder = BufferBuilder()
     bufferBuilder.allocate(Counter(n: 0))
-    bufferBuilder.allocate(TimeTravelState())
     let buffer = bufferBuilder.build()
     let kernel = KernelBuilder().build(buffer: buffer)
     let key = ObjectIdentifier(Counter.self)
@@ -75,7 +74,6 @@ private actor Latch {
 func inFlightCommandAtEntrySurvivesThePreviewStash() async {
     let bufferBuilder = BufferBuilder()
     bufferBuilder.allocate(Counter(n: 0))
-    bufferBuilder.allocate(TimeTravelState())
     let buffer = bufferBuilder.build()
 
     let started = Latch()
@@ -116,7 +114,6 @@ func inFlightCommandAtEntrySurvivesThePreviewStash() async {
 func exitWithoutAnActivePreviewIsHarmless() {
     let bufferBuilder = BufferBuilder()
     bufferBuilder.allocate(Counter(n: 7))
-    bufferBuilder.allocate(TimeTravelState())
     let buffer = bufferBuilder.build()
     let kernel = KernelBuilder().build(buffer: buffer)
 

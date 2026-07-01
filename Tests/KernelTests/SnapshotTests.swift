@@ -24,7 +24,6 @@ func declaredSnapshotStatesAreRecordedIntoBufferHistoryInOrder() async throws {
     let bufferBuilder = BufferBuilder()
     bufferBuilder.allocate(Counter(n: 1))
     bufferBuilder.allocate(Banner(message: "hello"))
-    bufferBuilder.allocate(BufferHistoryState())
     let buffer = bufferBuilder.build()
     let kernel = KernelBuilder().build(
         buffer: buffer,
@@ -49,7 +48,6 @@ func declaredSnapshotStatesAreRecordedIntoBufferHistoryInOrder() async throws {
 func snapshotImageRestoresTheCapturedPast() async throws {
     let bufferBuilder = BufferBuilder()
     bufferBuilder.allocate(Counter(n: 42))
-    bufferBuilder.allocate(BufferHistoryState())
     let buffer = bufferBuilder.build()
     let kernel = KernelBuilder().build(buffer: buffer, snapshotStates: [Counter.self])
 
@@ -66,12 +64,13 @@ func snapshotImageRestoresTheCapturedPast() async throws {
 @MainActor
 @Test
 func emptySnapshotStatesLeaveTheSinkInert() async {
-    // No states declared → the sink is a no-op: it must not touch
-    // `BufferHistoryState` (which is deliberately *not* allocated here — a live
-    // sink would trap on the missing store).
+    // No states declared → the sink is a no-op: `BufferHistoryState` (seeded by
+    // `build()` like every DEBUG buffer's monitor states) must stay untouched.
     let buffer = BufferBuilder().build()
     let kernel = KernelBuilder().build(buffer: buffer)
 
     await kernel.snapshotSink(UUID(), Date())
+
+    #expect(buffer.read(BufferHistoryState.self).snapshots.isEmpty)
 }
 #endif

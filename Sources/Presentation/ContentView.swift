@@ -4,16 +4,16 @@ import Contract
 import Observation
 
 /// Reads the global error channel from the buffer and clears it. The single
-/// place Presentation observes `AppErrorState`, written by the kernel's error
-/// sink when a dispatched command fails.
+/// place Presentation observes `KernelErrorState`, written by the kernel's
+/// default error sink when a dispatched command fails.
 @Observable
 @MainActor
 package final class GlobalErrorViewModel {
     private let kernel: Kernel
     package init(kernel: Kernel) { self.kernel = kernel }
 
-    var message: String? { kernel.buffer.read(AppErrorState.self).message }
-    func dismiss() { kernel.buffer.mutate(AppErrorState.self) { $0.message = nil } }
+    var message: String? { kernel.buffer.read(KernelErrorState.self).message }
+    func dismiss() { kernel.buffer.mutate(KernelErrorState.self) { $0.message = nil } }
 }
 
 /// Drives the DEBUG time-travel preview from the main window: reports whether a
