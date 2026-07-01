@@ -14,14 +14,14 @@ import Foundation
 /// struct without touching `build`'s signature. Ignored entirely in release
 /// (the sinks it configures are no-ops there); unfenced for the same reason as
 /// the sinks — fencing would fork `build()`'s signature across configurations.
-package struct MonitorOptions: Sendable {
+public struct MonitorOptions: Sendable {
     /// Ring size of `TraceState` when the default trace sink is used
     /// (an injected `onTrace` owns its own cap).
-    package var traceCap: Int
+    public var traceCap: Int
     /// Ring size of `BufferHistoryState` used by the synthesized snapshot sink.
-    package var snapshotCap: Int
+    public var snapshotCap: Int
 
-    package init(traceCap: Int = 300, snapshotCap: Int = 100) {
+    public init(traceCap: Int = 300, snapshotCap: Int = 100) {
         self.traceCap = traceCap
         self.snapshotCap = snapshotCap
     }

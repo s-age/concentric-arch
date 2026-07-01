@@ -3,7 +3,7 @@ import Foundation
 
 // Rendering live values into something human-readable — the inspection side of
 // the DEBUG monitor. `traced` (Kernel+Trace) reads both members per invoke;
-// the monitor's toggle and detail pane bind to them from Presentation.
+// the monitor's toggle and detail pane bind to them from the monitor UI.
 
 extension Kernel {
     /// Single runtime toggle for the monitor's two captures: each invoke's input
@@ -17,7 +17,7 @@ extension Kernel {
     /// onto the main actor and serialize them. The monitor's toggle binds straight
     /// to it. The race on a lone debug bool is benign (a flip may catch one
     /// in-flight invoke either way), so `nonisolated(unsafe)` rather than an atomic.
-    nonisolated(unsafe) package static var recordsInspection = false
+    nonisolated(unsafe) public static var recordsInspection = false
 
     /// Best-effort, length-capped *pretty* rendering of an invoke's input. Built
     /// eagerly at the call site because `payload` is `Any` — neither `Sendable`
@@ -28,7 +28,7 @@ extension Kernel {
     /// conformance — matching the Buffer tab. The cap bounds what we *store*, not
     /// what rendering costs to *build* — a huge payload is heavy regardless;
     /// `recordsInspection` is the cost guard, the cap is hygiene.
-    package static func describePayload(_ payload: Any, cap: Int = 1024) -> String {
+    public static func describePayload(_ payload: Any, cap: Int = 1024) -> String {
         var full = ""
         dump(payload, to: &full)
         // `dump` ends every value with a newline; drop it so a scalar payload

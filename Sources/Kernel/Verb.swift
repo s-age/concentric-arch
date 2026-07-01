@@ -11,7 +11,7 @@ import Foundation
 /// discard the rest of the pipe, so their value never lands in a typed payload
 /// slot; it leaves once, through `compose`'s single boundary cast. That is why
 /// they can be erased to `Any` without losing any guarantee that ever existed.
-package enum Verb<Forward> {
+public enum Verb<Forward> {
     /// Continue: `Forward` becomes the next stage's payload.
     case next(Forward)
     /// Normal early termination: stop here, this value is the pipe's result.
@@ -55,11 +55,11 @@ extension Verb {
 /// `@Sendable` closures plus `Sendable` descriptors, and `payload`'s concrete
 /// type was pinned `Sendable` by the generic initializer before being erased
 /// to `Any` here.
-package struct Diversion: @unchecked Sendable {
+public struct Diversion: @unchecked Sendable {
     let stages: [PipeStage]
     let payload: Any
 
-    package init<I: Sendable, O>(_ pipe: Pipe<I, O>, _ payload: I) {
+    public init<I: Sendable, O>(_ pipe: Pipe<I, O>, _ payload: I) {
         self.stages = pipe.stages
         self.payload = payload
     }

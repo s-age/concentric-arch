@@ -21,7 +21,7 @@ extension Kernel {
     /// to finish and write the buffer, and the stash reflects that write instead
     /// of losing it to the following `restore`.
     @MainActor
-    package func previewTimeTravel(root: UUID, image: BufferImage) async {
+    public func previewTimeTravel(root: UUID, image: BufferImage) async {
         if buffer.read(TimeTravelState.self).stashedPresent == nil {
             await commands.suspendAndWaitUntilIdle()
             let present = buffer.capture(Set(image.keys))
@@ -34,7 +34,7 @@ extension Kernel {
     /// Leave the preview: put the stashed present back and resume command draining.
     /// No-op if no preview is active.
     @MainActor
-    package func exitTimeTravel() {
+    public func exitTimeTravel() {
         guard let present = buffer.read(TimeTravelState.self).stashedPresent else { return }
         buffer.restore(present)
         commands.resumeDraining()
