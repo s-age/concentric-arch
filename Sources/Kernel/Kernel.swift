@@ -83,13 +83,15 @@ package final class KernelBuilder {
     /// Freeze the bindings into an immutable `Kernel`. The `Buffer` (the typed,
     /// observable state region) is built separately by `BufferBuilder` and handed
     /// in here, so the kernel owns both the behaviour side (`call`) and the state
-    /// side (`buffer`).
-    /// Freeze the bindings into an immutable `Kernel`. `onError` is the sink for
-    /// failures of fire-and-forget commands (`Kernel.dispatch`): the App wires it
-    /// to publish into the buffer's error state, so the kernel routes errors
-    /// through the buffer without knowing the concrete error-state type. `symbol`
-    /// is the id of the dispatched command that failed — the caller already holds
-    /// it, so it travels alongside the error rather than being dropped.
+    /// side (`buffer`). `onError` is the sink for failures of fire-and-forget
+    /// commands (`Kernel.dispatch`): the App wires it to publish into the buffer's
+    /// error state, so the kernel routes errors through the buffer without
+    /// knowing the concrete error-state type. `symbol` is the id of the
+    /// dispatched command that failed — the caller already holds it, so it
+    /// travels alongside the error rather than being dropped. `onTrace` and
+    /// `onSnapshot` are the DEBUG monitor sinks: the App wires them to record
+    /// spans and per-flow-root snapshots without the kernel knowing anything
+    /// about the monitor's concrete state types.
     package func build(
         buffer: Buffer,
         onError: @escaping @Sendable (_ error: any Error, _ symbol: String) async -> Void = { _, _ in },
