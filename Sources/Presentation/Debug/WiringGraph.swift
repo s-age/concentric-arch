@@ -130,65 +130,28 @@ private func layerColor(_ symbol: String?) -> Color {
 // concrete handler. Two targets per node:
 //   • wire-site  — precise (file:line, captured by the builder). For an anonymous
 //                  stage this IS its implementation (the closure). Non-rotting.
-//   • impl       — the concrete leaf handler, resolved by CONVENTION from the symbol
-//                  id (best-effort — may drift if files move). This same table is the
-//                  seed of generating Drivers from convention instead of hand-writing.
-
-/// Symbol id (`Layer.Device.method`) → the concrete implementation file, relative to
-/// the repo root. Best-effort convention; a miss just falls back to the wire-site.
-private func implRelativePath(forSymbol id: String) -> String? {
-    let device = id.split(separator: ".").prefix(2).joined(separator: ".")
-    switch device {
-    case "Compute.Slideshow":       return "Sources/Compute/SlideshowCompute.swift"
-    case "Compute.Image":           return "Sources/Compute/ImageCompute.swift"
-    case "Infrastructure.Slideshow",
-         "Infrastructure.Library":  return "Sources/Infrastructure/Slideshow/Slideshow.swift"
-    case "Infrastructure.Config":   return "Sources/Infrastructure/Config/ConfigStore.swift"
-    default:                        return nil
-    }
-}
+//   • impl       — the concrete leaf handler, resolved STRUCTURALLY from the symbol
+//                  id (see `ImplLocationResolver.swift`): `@callable`'s protocol name
+//                  → whichever type conforms to it → wherever that type actually
+//                  defines the method. No hand-maintained table, no regex — every
+//                  file is re-read and re-parsed on each lookup, so it always
+//                  reflects what's on disk right now, rebuild or not.
 
 /// Derive the repo root from any absolute source path under `<root>/Sources/…`
-/// (every wire-site is such a path), so convention-relative impl paths can anchor.
+/// (every wire-site is such a path), so the resolver's directory scans can anchor.
 private func repoRoot(from absolutePath: String) -> String? {
     guard let r = absolutePath.range(of: "/Sources/") else { return nil }
     return String(absolutePath[absolutePath.startIndex..<r.lowerBound])
 }
 
-/// The concrete-impl location for a symbol node (convention), anchored to the repo
-/// root taken from the node's own wire-site. `nil` for anonymous nodes or a miss.
-/// Line is the method's `func` declaration when found by convention, else 1.
+/// The concrete-impl location for a symbol node, anchored to the repo root taken
+/// from the node's own wire-site. `nil` for anonymous nodes or a miss.
 private func implLocation(for stage: WiringStage) -> SourceLocation? {
     guard let symbol = stage.symbol,
-          let rel = implRelativePath(forSymbol: symbol),
           let site = stage.wireSite,
           let root = repoRoot(from: site.file)
     else { return nil }
-    let file = "\(root)/\(rel)"
-    let method = symbol.split(separator: ".").dropFirst(2).joined(separator: ".")
-    return SourceLocation(file: file, line: methodDeclarationLine(in: file, method: method) ?? 1)
-}
-
-/// The line of `func <method>`'s declaration in `file`, by convention (best-effort
-/// text search, not an AST parse). Comment lines are skipped so a docstring or a
-/// commented-out declaration mentioning the name can't produce a false hit.
-private func methodDeclarationLine(in file: String, method: String) -> Int? {
-    guard !method.isEmpty,
-          let text = try? String(contentsOfFile: file, encoding: .utf8),
-          let regex = try? NSRegularExpression(
-              pattern: #"^(?:(?:package|public|internal|fileprivate|private|open)\s+)*"#
-                  + #"(?:static\s+|final\s+|mutating\s+|nonisolated\s+)*func\s+"#
-                  + NSRegularExpression.escapedPattern(for: method) + #"\s*[(<]"#
-          )
-    else { return nil }
-    for (index, line) in text.components(separatedBy: .newlines).enumerated() {
-        let trimmed = line.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.hasPrefix("//") else { continue }
-        if regex.firstMatch(in: trimmed, range: NSRange(trimmed.startIndex..., in: trimmed)) != nil {
-            return index + 1
-        }
-    }
-    return nil
+    return resolveImplLocation(forSymbol: symbol, repoRoot: root)
 }
 
 private func fileName(_ path: String) -> String {
@@ -412,7 +375,7 @@ struct WiringGraphView: View {
                     if stage.kind == .fork { detailRow("branches", "\(stage.forkBranches.count)") }
                     if let note = stage.note { detailRow("description", note) }
                     if let impl = implLocation(for: stage) {
-                        openRow("implementation", "\(fileName(impl.file))  (convention)", impl)
+                        openRow("implementation", "\(fileName(impl.file))  (resolved)", impl)
                     }
                     if let site = stage.wireSite {
                         openRow(stage.symbol == nil ? "closure" : "wire-site",
@@ -592,7 +555,7 @@ private struct StageNodeView: View {
                     .buttonStyle(.borderless)
                     .help(stage.symbol == nil
                           ? "Open this stage's closure in the editor"
-                          : "Open the implementation in the editor (convention)")
+                          : "Open the implementation in the editor (resolved)")
                 }
             }
             if let symbol = stage.symbol {
