@@ -21,6 +21,54 @@ private struct UndocumentedCallable: DiagnosticMessage {
     var severity: DiagnosticSeverity { .warning }
 }
 
+/// Two `@callable` protocols minted the same "<prefix>.<method>" id. Left
+/// undetected, `KernelBuilder.register` would silently overwrite one binding
+/// with the other in `handlers` — the last `wire(...)` call would win with no
+/// signal (cf. the wiring-totality stance: a hole this quiet must fail loud).
+private struct DuplicateSymbolID: DiagnosticMessage {
+    let id: String
+    let otherProtocol: String
+    let otherFile: String
+    var message: String {
+        "@callable symbol id \"\(id)\" is also minted by '\(otherProtocol)' in \(otherFile) — both would register under the same key, silently overwriting one in KernelBuilder"
+    }
+    var diagnosticID: MessageID { MessageID(domain: "CallableMacro", id: "duplicateSymbolID") }
+    var severity: DiagnosticSeverity { .error }
+}
+
+/// The absolute path of the file `node` is declared in, per the compiler's
+/// own source-location tracking (not `#file`, which reflects this plugin's
+/// own source).
+private func currentFilePath(of node: some SyntaxProtocol, context: some MacroExpansionContext) -> String? {
+    context.location(of: node, at: .afterLeadingTrivia, filePathMode: .filePath)?
+        .file.as(StringLiteralExprSyntax.self)?.representedLiteralValue
+}
+
+/// Every symbol id minted by `@callable` across all expansions this plugin
+/// process handles, so a later expansion can tell whether some *other*
+/// protocol already claimed the same id. A macro compiler plugin is a
+/// sandboxed subprocess — it can't list directories or read sibling files
+/// off disk to check for cross-protocol collisions itself — so this is an
+/// in-memory registry, not a filesystem scan.
+private final class SymbolIDRegistry: @unchecked Sendable {
+    static let shared = SymbolIDRegistry()
+    private let lock = NSLock()
+    private var owners: [String: (protocolName: String, file: String)] = [:]
+
+    /// Claims `id` for `protocolName`. Returns the id's existing owner when a
+    /// *different* protocol already claimed it (a real collision); returns
+    /// `nil` on first claim or on re-claiming by the same protocol.
+    func claim(id: String, protocolName: String, file: String) -> (protocolName: String, file: String)? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let existing = owners[id], existing.protocolName != protocolName {
+            return existing
+        }
+        owners[id] = (protocolName, file)
+        return nil
+    }
+}
+
 /// The `///` (or `/** */`) doc comment attached to a declaration, collapsed to a
 /// single line — lifted into the generated `Symbol.description` so "what this part
 /// does" is data on the symbol, sourced from the one place it's declared.
@@ -86,9 +134,18 @@ public struct CallableMacro: PeerMacro {
         var symbolLines: [String] = []
         var wireLines: [String] = []
 
+        let file = currentFilePath(of: node, context: context) ?? "<unknown file>"
+
         for member in proto.memberBlock.members {
             guard let fn = member.decl.as(FunctionDeclSyntax.self) else { continue }
             let name = fn.name.text
+            let id = "\(prefix).\(name)"
+            if let existing = SymbolIDRegistry.shared.claim(id: id, protocolName: protoName, file: file) {
+                context.diagnose(Diagnostic(
+                    node: fn.name,
+                    message: DuplicateSymbolID(id: id, otherProtocol: existing.protocolName, otherFile: existing.file)
+                ))
+            }
             let allParams = Array(fn.signature.parameterClause.parameters)
 
             // A leading `Kernel` parameter marks a *composing* handler — one that
@@ -129,7 +186,7 @@ public struct CallableMacro: PeerMacro {
                 context.diagnose(Diagnostic(node: fn.name, message: UndocumentedCallable(name: name)))
             }
 
-            symbolLines.append(#"    package static let \#(name) = Symbol<\#(payloadType), \#(output)>("\#(prefix).\#(name)"\#(descriptionArg))"#)
+            symbolLines.append(#"    package static let \#(name) = Symbol<\#(payloadType), \#(output)>(\#(swiftStringLiteral(id))\#(descriptionArg))"#)
             wireLines.append("        builder.register(\(name)) { \(closureParams.joined(separator: ", ")) in \(effectPrefix)device.\(name)(\(callArgs.joined(separator: ", "))) }")
         }
 
