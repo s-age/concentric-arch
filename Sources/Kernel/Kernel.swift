@@ -46,13 +46,27 @@ package final class KernelBuilder {
     /// `KernelError.unbound` on a cold path into a CI failure.
     package var boundSymbolIDs: Set<String> { Set(handlers.keys) }
 
+    /// The single write point of the handler table — every `register` overload
+    /// funnels through here. Two bindings for one symbol id would silently
+    /// last-write-win, and which handler answers a symbol is the runtime half of
+    /// the architecture's guarantee, so a duplicate traps immediately at the
+    /// second `register` (where the stack names the offender) rather than
+    /// surfacing as the wrong device answering on some cold path. Build-then-
+    /// freeze makes this a `precondition`, not a `throw`: wiring is
+    /// single-threaded startup code, so a duplicate is always a programming
+    /// error, never an input.
+    private func bind(_ id: String, _ handler: @escaping ErasedHandler) {
+        precondition(handlers[id] == nil, "Symbol '\(id)' is already bound — duplicate register")
+        handlers[id] = handler
+    }
+
     /// Bind a *leaf* handler — one that fulfils the symbol on its own and makes
     /// no further kernel calls (e.g. an Infrastructure port hitting a store).
     /// The public signature is fully typed (`(P) async throws -> O`); the unsafe
     /// `as!` that erases to `Any` is confined here, and is safe because the same
     /// `Symbol` pins both ends. The plain return is implicitly the `.next` verb.
     package func register<P, O>(_ symbol: Symbol<P, O>, _ handler: @escaping @Sendable (P) async throws -> O) {
-        handlers[symbol.id] = { _, payload in .next(try await handler(payload as! P)) }
+        bind(symbol.id) { _, payload in .next(try await handler(payload as! P)) }
     }
 
     /// Bind a *composing* handler — one that receives the kernel so it can call
@@ -61,7 +75,7 @@ package final class KernelBuilder {
     /// it in, is what breaks the build-order cycle: the handler needs the kernel
     /// only when invoked, by which point `build()` has already produced it.
     package func register<P, O>(_ symbol: Symbol<P, O>, _ handler: @escaping @Sendable (Kernel, P) async throws -> O) {
-        handlers[symbol.id] = { kernel, payload in .next(try await handler(kernel, payload as! P)) }
+        bind(symbol.id) { kernel, payload in .next(try await handler(kernel, payload as! P)) }
     }
 
     /// Bind a *verb-returning* leaf handler — one that owns its own pipeline
@@ -70,14 +84,14 @@ package final class KernelBuilder {
     /// that `.fail`s on a missing row); via `call` the verb is interpreted down
     /// to the symbol's `Output`.
     package func register<P, O>(_ symbol: Symbol<P, O>, _ handler: @escaping @Sendable (P) async throws -> Verb<O>) {
-        handlers[symbol.id] = { _, payload in try await handler(payload as! P).erased() }
+        bind(symbol.id) { _, payload in try await handler(payload as! P).erased() }
     }
 
     /// Bind a *verb-returning composing* handler — the kernel-taking counterpart
     /// of the above, for a handler that both calls other symbols and decides the
     /// verb itself.
     package func register<P, O>(_ symbol: Symbol<P, O>, _ handler: @escaping @Sendable (Kernel, P) async throws -> Verb<O>) {
-        handlers[symbol.id] = { kernel, payload in try await handler(kernel, payload as! P).erased() }
+        bind(symbol.id) { kernel, payload in try await handler(kernel, payload as! P).erased() }
     }
 
     /// Freeze the bindings into an immutable `Kernel`. The `Buffer` (the typed,
