@@ -1,6 +1,15 @@
 {
-  "originHash" : "622d9f3833a7eb0f342a7f6252da33a10d842ad69de8fed32dca103fe607ac2b",
+  "originHash" : "5b83b4dc79b860afa9a472f372fe9f4982746ffea2438eca9ec4f9ece6d4ab6d",
   "pins" : [
+    {
+      "identity" : "swift-kernelee",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/s-age/swift-kernelee.git",
+      "state" : {
+        "revision" : "52dd897ac74b0e127a5a7b43397445a59cbb8fab",
+        "version" : "0.1.0"
+      }
+    },
     {
       "identity" : "swift-syntax",
       "kind" : "remoteSourceControl",
