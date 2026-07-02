@@ -12,95 +12,24 @@ import Kernel
 /// the canvas. The downward flow keeps reading low-effort — no horizontal scrub.
 ///
 /// The structure is **derived by static introspection**, not hand-authored: the
-/// composition root reads each real `Pipe`'s `StageDescriptor`s and injects them
-/// as `[WiringPipeline]`. Kind/symbol/flowing-type are all read from the actual
+/// composition root reads each real `Pipe`'s shape and injects it as
+/// `[PipeDescriptor]` — the kernel's own carriers, consumed directly, no
+/// re-encoding in between. Kind/symbol/flowing-type are all read from the actual
 /// pipelines, so the picture cannot drift from the code. What is a *repository's*
 /// convention — layer colours, key elision, the impl-jump resolver — arrives the
 /// same way, via `WiringGraphConfiguration`.
 ///
 /// What is *not* derivable stays out: the non-`.next` branch verbs (`.fail` guards)
-/// live inside opaque closures, and prose descriptions are a separate concern — a
-/// small per-symbol overlay (`symbolDescriptions`) supplies the "what it does" for
-/// named nodes; anonymous map/effect stages name only their kind. Out-of-pipe work
-/// (bare buffer writes, payload builds) arrives as a pipeline `note`.
+/// live inside opaque closures. The prose on a named node is the symbol's own
+/// `description` (lifted by the symbol generator from the port method's doc
+/// comment, carried on `StageDescriptor`); anonymous map/effect stages name only
+/// their kind. Out-of-pipe work (bare buffer writes, payload builds) arrives as a
+/// pipeline `note`.
 
-// MARK: - Model
-
-/// The builder method that minted a stage — its role in the pipe. Mirrors
-/// `Kernel.StageDescriptor.Kind` (and the `PipeBuilder` surface in `Pipe.swift`).
-enum StageKind: String {
-    case pipe          // .pipe(symbol)               — invoke, its verb drives the pipe
-    case pipeAdapt     // .pipe(symbol) { adapt }      — build the next payload, then invoke
-    case verb          // .pipe { -> Verb }            — anonymous self-describing stage (a guard)
-    case tap           // .tap(symbol)                 — side-effect, the value flows through
-    case map           // .map(transform)              — pure projection
-    case effect        // .effect { ... }              — effectful passthrough (a buffer write)
-    case fork          // .fork(...)                   — parallel fan-out, order-preserving join
-}
-
-/// One node: a single pipe stage. `symbol` is the dotted id it invokes
-/// (`Layer.Device.method`) or `nil` for an anonymous stage. `flows` is the type
-/// leaving this stage — the label on the outgoing `.next` wire. `branches` lists
-/// non-`.next` verbs (not statically derivable, so empty from the introspected
-/// source — kept for a future annotation overlay).
-public struct WiringStage: Sendable {
-    let kind: StageKind
-    let symbol: String?
-    let flows: String
-    let note: String?
-    var branches: [String] = []
-    /// `.fork` only: each branch's own stage list (it is a sub-pipe), in fork's
-    /// declared order. Empty for every other kind. Distinct from `branches` above
-    /// (non-`.next` verb badges) — fork's fan-out is normal-path structure, not a
-    /// warning annotation.
-    var forkBranches: [[WiringStage]] = []
-    /// `.verb` only: dispatch keys this stage's author named as possible `.divert`
-    /// targets — never derived (the real target is runtime-decided), just an
-    /// author's hint. The graph renders each as a jump link when it resolves to a
-    /// known `WiringPipeline.key`, or a dim unresolved label otherwise.
-    let divertsTo: [String]
-    /// Where this stage is wired in source (precise, from the builder). For an
-    /// anonymous stage this is where its closure — the implementation — lives.
-    let wireSite: SourceLocation?
-
-    /// Map a Kernel `StageDescriptor` (the static shape) into a view node. The
-    /// prose `note` is the symbol's own `description` — lifted by the `@callable`
-    /// macro from the port method's doc comment — so there's no separate lookup to
-    /// maintain. Anonymous stages (map/effect) carry none and show only their kind.
-    public init(descriptor: StageDescriptor) {
-        self.kind = StageKind(rawValue: descriptor.kind.rawValue) ?? .effect
-        self.symbol = descriptor.symbolID
-        self.flows = prettyType(descriptor.flows)
-        self.note = descriptor.description
-        self.branches = []
-        self.forkBranches = descriptor.branches.map { $0.map(WiringStage.init(descriptor:)) }
-        self.divertsTo = descriptor.divertsTo
-        self.wireSite = descriptor.wireSite
-    }
-}
-
-/// One pipeline expanded: the dispatch key it backs, the payload that enters
-/// the pipe, and the ordered stages. `note` carries out-of-pipe context (work that
-/// happens around `kernel.run` and so is invisible to the static source).
-public struct WiringPipeline: Sendable {
-    let key: String        // the dispatch key the pipe backs, e.g. "Circuit.Slideshow.update"
-    let title: String      // the saga function, e.g. "updateSlideshow"
-    let input: String      // the type fed into the pipe
-    let stages: [WiringStage]
-    var note: String? = nil
-
-    var branchCount: Int { stages.reduce(0) { $0 + $1.branches.count } }
-
-    public init(key: String, title: String, input: String, stages: [WiringStage], note: String?) {
-        self.key = key
-        self.title = title
-        self.input = prettyType(input)
-        self.stages = stages
-        self.note = note
-    }
-}
+// MARK: - Model (Kernel's descriptors, rendered directly)
 
 /// `\(T.self)` renders `Optional<X>`/`Array<X>`; show the sugar form instead.
+/// Display-only sugar — applied at render, never baked into the descriptors.
 private func prettyType(_ raw: String) -> String {
     var s = raw.replacingOccurrences(of: "Swift.", with: "")
     if s.hasPrefix("Optional<"), s.hasSuffix(">") {
@@ -109,6 +38,16 @@ private func prettyType(_ raw: String) -> String {
         s = "[" + String(s.dropFirst("Array<".count).dropLast()) + "]"
     }
     return s == "()" ? "Void" : s
+}
+
+private extension StageDescriptor {
+    /// The type leaving this stage — the label on its `.next` wire, sugared.
+    var prettyFlows: String { prettyType(flows) }
+}
+
+private extension PipeDescriptor {
+    /// The type entering the pipe, sugared.
+    var prettyInput: String { prettyType(inputType) }
 }
 
 // MARK: - Source navigation
@@ -162,32 +101,32 @@ struct WiringGraphView: View {
     /// stack (no forward/redo) for `divertsTo` jump links.
     @State private var navigationHistory: [String] = []
 
-    /// The introspected pipelines, injected by App (composition root) from the real
-    /// Circuit pipes — this view does not depend on Circuit.
-    private let pipelines: [WiringPipeline]
+    /// The introspected pipelines, injected by the composition root from its real
+    /// orchestration pipes — this view depends on Kernel's carriers only.
+    private let pipelines: [PipeDescriptor]
 
-    init(pipelines: [WiringPipeline]) {
+    init(pipelines: [PipeDescriptor]) {
         self.pipelines = pipelines
         _selectedKey = State(initialValue: pipelines.first?.key)
     }
 
-    private var filtered: [WiringPipeline] {
+    private var filtered: [PipeDescriptor] {
         guard !search.isEmpty else { return pipelines }
         let q = search.lowercased()
         return pipelines.filter { p in
             p.title.lowercased().contains(q)
                 || p.key.lowercased().contains(q)
-                || p.stages.contains { ($0.symbol ?? "").lowercased().contains(q) }
+                || p.stages.contains { ($0.symbolID ?? "").lowercased().contains(q) }
         }
     }
 
-    private var selectedPipeline: WiringPipeline? {
+    private var selectedPipeline: PipeDescriptor? {
         pipelines.first { $0.key == selectedKey }
     }
 
     /// Dispatch key → title, so a `divertsTo` chip can show a human name instead
     /// of the raw key — and so a stage can tell whether its named target actually
-    /// resolves to a pipeline in this catalog at all.
+    /// resolves to a descriptor in this catalog at all.
     private var titlesByKey: [String: String] {
         Dictionary(uniqueKeysWithValues: pipelines.map { ($0.key, $0.title) })
     }
@@ -253,7 +192,7 @@ struct WiringGraphView: View {
         }
     }
 
-    private func toolbar(_ pipeline: WiringPipeline) -> some View {
+    private func toolbar(_ pipeline: PipeDescriptor) -> some View {
         HStack(spacing: 12) {
             if !navigationHistory.isEmpty {
                 Button { navigateBack() } label: { Image(systemName: "chevron.backward") }
@@ -289,12 +228,12 @@ struct WiringGraphView: View {
 
     // The downward node flow. Vertical primary; horizontal scroll only matters when
     // zoomed past the pane width.
-    private func canvas(_ pipeline: WiringPipeline) -> some View {
+    private func canvas(_ pipeline: PipeDescriptor) -> some View {
         ScrollView([.vertical, .horizontal]) {
             VStack(spacing: 0) {
-                EntryChip(type: pipeline.input)
+                EntryChip(type: pipeline.prettyInput)
                 ForEach(Array(pipeline.stages.enumerated()), id: \.offset) { idx, stage in
-                    FlowArrow(type: idx == 0 ? pipeline.input : pipeline.stages[idx - 1].flows)
+                    FlowArrow(type: idx == 0 ? pipeline.prettyInput : pipeline.stages[idx - 1].prettyFlows)
                     StageNodeView(
                         stage: stage,
                         isSelected: selectedStage == idx,
@@ -308,10 +247,10 @@ struct WiringGraphView: View {
                     // buttons (open-in-editor, divertsTo links) before they ever
                     // fire.
                     .simultaneousGesture(TapGesture().onEnded { selectedStage = idx })
-                    if stage.kind == .fork, !mainLineOnly, !stage.forkBranches.isEmpty {
+                    if stage.kind == .fork, !mainLineOnly, !stage.branches.isEmpty {
                         ForkBranchesView(
-                            branches: stage.forkBranches,
-                            entryType: idx == 0 ? pipeline.input : pipeline.stages[idx - 1].flows,
+                            branches: stage.branches,
+                            entryType: idx == 0 ? pipeline.prettyInput : pipeline.stages[idx - 1].prettyFlows,
                             mainLineOnly: mainLineOnly,
                             collapsed: collapsed,
                             titlesByKey: titlesByKey,
@@ -329,29 +268,29 @@ struct WiringGraphView: View {
 
     // MARK: Bottom — selected node inspector
 
-    private func nodeDetail(_ pipeline: WiringPipeline) -> some View {
+    private func nodeDetail(_ pipeline: PipeDescriptor) -> some View {
         ScrollView {
             if let idx = selectedStage, pipeline.stages.indices.contains(idx) {
                 let stage = pipeline.stages[idx]
-                let input = idx == 0 ? pipeline.input : pipeline.stages[idx - 1].flows
+                let input = idx == 0 ? pipeline.prettyInput : pipeline.stages[idx - 1].prettyFlows
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        RoundedRectangle(cornerRadius: 3).fill(configuration.style.color(forSymbol: stage.symbol)).frame(width: 11, height: 11)
-                        Text(stage.symbol ?? stage.note ?? "anonymous").font(.system(.headline, design: .monospaced))
+                        RoundedRectangle(cornerRadius: 3).fill(configuration.style.color(forSymbol: stage.symbolID)).frame(width: 11, height: 11)
+                        Text(stage.symbolID ?? stage.description ?? "anonymous").font(.system(.headline, design: .monospaced))
                         Text(stage.kind.rawValue)
                             .font(.system(.caption, design: .monospaced))
                             .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(configuration.style.color(forSymbol: stage.symbol).opacity(0.18)))
+                            .background(Capsule().fill(configuration.style.color(forSymbol: stage.symbolID).opacity(0.18)))
                     }
-                    detailRow("payload", "\(input)  →  \(stage.flows)")
-                    detailRow("emits", ([".next"] + stage.branches).joined(separator: "     "))
-                    if stage.kind == .fork { detailRow("branches", "\(stage.forkBranches.count)") }
-                    if let note = stage.note { detailRow("description", note) }
+                    detailRow("payload", "\(input)  →  \(stage.prettyFlows)")
+                    detailRow("emits", ".next")
+                    if stage.kind == .fork { detailRow("branches", "\(stage.branches.count)") }
+                    if let note = stage.description { detailRow("description", note) }
                     if let impl = configuration.implLocation(for: stage) {
                         openRow("implementation", "\(fileName(impl.file))  (resolved)", impl)
                     }
                     if let site = stage.wireSite {
-                        openRow(stage.symbol == nil ? "closure" : "wire-site",
+                        openRow(stage.symbolID == nil ? "closure" : "wire-site",
                                 "\(fileName(site.file)):\(site.line)", site)
                     }
                 }
@@ -397,7 +336,7 @@ struct WiringGraphView: View {
 
 private struct SidebarRow: View {
     @Environment(\.wiringGraphConfiguration) private var configuration
-    let pipeline: WiringPipeline
+    let pipeline: PipeDescriptor
 
     var body: some View {
         VStack(alignment: .leading, spacing: 3) {
@@ -408,10 +347,6 @@ private struct SidebarRow: View {
                 Spacer()
                 Label("\(pipeline.stages.count)", systemImage: "square.stack.3d.up.fill")
                     .font(.caption2).foregroundStyle(.secondary)
-                if pipeline.branchCount > 0 {
-                    Label("\(pipeline.branchCount)", systemImage: "exclamationmark.triangle.fill")
-                        .font(.caption2).foregroundStyle(.orange)
-                }
             }
         }
         .padding(.vertical, 3)
@@ -453,7 +388,7 @@ private struct FlowArrow: View {
 /// The main spine's own `FlowArrow` below this (captioned with the fork's own
 /// `flows`, the joined tuple/array) is what visually reads as the rejoin.
 private struct ForkBranchesView: View {
-    let branches: [[WiringStage]]
+    let branches: [[StageDescriptor]]
     let entryType: String
     let mainLineOnly: Bool
     let collapsed: Bool
@@ -465,7 +400,7 @@ private struct ForkBranchesView: View {
             ForEach(Array(branches.enumerated()), id: \.offset) { _, stages in
                 VStack(spacing: 0) {
                     ForEach(Array(stages.enumerated()), id: \.offset) { idx, stage in
-                        FlowArrow(type: idx == 0 ? entryType : stages[idx - 1].flows)
+                        FlowArrow(type: idx == 0 ? entryType : stages[idx - 1].prettyFlows)
                         StageNodeView(
                             stage: stage,
                             isSelected: false,
@@ -482,19 +417,19 @@ private struct ForkBranchesView: View {
     }
 }
 
-/// One stage as a node card: kind, the symbol it invokes (or "anonymous"), the
-/// note, and any branch-verb badges. `mainLineOnly` strips notes + branches to the
-/// spine; `collapsed` shrinks anonymous map/effect to a compact row.
+/// One stage as a node card: kind, the symbol it invokes (or "anonymous"), and
+/// the note. `mainLineOnly` strips notes + divert chips to the spine; `collapsed`
+/// shrinks anonymous map/effect to a compact row.
 private struct StageNodeView: View {
     @Environment(\.wiringGraphConfiguration) private var configuration
-    let stage: WiringStage
+    let stage: StageDescriptor
     let isSelected: Bool
     let mainLineOnly: Bool
     let collapsed: Bool
     let titlesByKey: [String: String]
     let onNavigate: (String) -> Void
 
-    private var isAnonymous: Bool { stage.symbol == nil }
+    private var isAnonymous: Bool { stage.symbolID == nil }
     private var isCompact: Bool {
         collapsed && isAnonymous && (stage.kind == .map || stage.kind == .effect)
     }
@@ -510,7 +445,7 @@ private struct StageNodeView: View {
         .background(RoundedRectangle(cornerRadius: 10).fill(Color(nsColor: .controlBackgroundColor)))
         .overlay(
             RoundedRectangle(cornerRadius: 10)
-                .stroke(isSelected ? Color.accentColor : configuration.style.color(forSymbol: stage.symbol),
+                .stroke(isSelected ? Color.accentColor : configuration.style.color(forSymbol: stage.symbolID),
                         lineWidth: isSelected ? 3 : 1.5)
         )
         .contentShape(Rectangle())
@@ -521,27 +456,27 @@ private struct StageNodeView: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(stage.kind.rawValue)
                     .font(.system(.caption, design: .monospaced).weight(.semibold))
-                    .foregroundStyle(configuration.style.color(forSymbol: stage.symbol))
+                    .foregroundStyle(configuration.style.color(forSymbol: stage.symbolID))
                 Spacer()
                 if let target = primaryTarget {
                     Button { openInEditor(target) } label: {
                         Image(systemName: "arrow.up.forward.square")
                     }
                     .buttonStyle(.borderless)
-                    .help(stage.symbol == nil
+                    .help(stage.symbolID == nil
                           ? "Open this stage's closure in the editor"
                           : "Open the implementation in the editor (resolved)")
                 }
             }
-            if let symbol = stage.symbol {
+            if let symbol = stage.symbolID {
                 Text(symbol)
                     .font(.system(.title3, design: .monospaced))
                     .foregroundStyle(.primary)
-                if !mainLineOnly, let note = stage.note {
+                if !mainLineOnly, let note = stage.description {
                     Text(note).font(.callout).foregroundStyle(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            } else if let note = stage.note, !mainLineOnly {
+            } else if let note = stage.description, !mainLineOnly {
                 // Anonymous: its label is the node's identity — show it as the headline.
                 Text(note).font(.callout).foregroundStyle(.primary)
                     .fixedSize(horizontal: false, vertical: true)
@@ -552,9 +487,6 @@ private struct StageNodeView: View {
                     .foregroundStyle(.tertiary)
             }
             if !mainLineOnly {
-                ForEach(stage.branches, id: \.self) { branch in
-                    Text(branch).font(.caption.weight(.medium)).foregroundStyle(.red)
-                }
                 ForEach(stage.divertsTo, id: \.self) { key in
                     DivertLinkChip(targetKey: key, title: titlesByKey[key], onNavigate: onNavigate)
                 }
@@ -569,7 +501,7 @@ private struct StageNodeView: View {
             Text(stage.kind.rawValue)
                 .font(.system(.caption, design: .monospaced).weight(.semibold))
                 .foregroundStyle(.gray)
-            Text(stage.note ?? stage.kind.rawValue).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Text(stage.description ?? stage.kind.rawValue).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             Spacer()
         }
         .padding(.horizontal, 14).padding(.vertical, 9)
@@ -578,7 +510,7 @@ private struct StageNodeView: View {
 }
 
 /// A `divertsTo` hint rendered as a jump link when `title` resolves (the key
-/// matches a `WiringPipeline` in this catalog), or as a dim, non-interactive
+/// matches a `PipeDescriptor` in this catalog), or as a dim, non-interactive
 /// label when it doesn't — an unresolved chip is a passive drift detector: the
 /// author named a target that no longer exists under that key.
 private struct DivertLinkChip: View {
@@ -630,15 +562,16 @@ private final class WiringGraphPanel: NSPanel {
 }
 
 /// Opens/closes the wiring graph as a single floating panel. The composition root
-/// wires a Debug menu command to `toggle`, passing the pipelines it introspected
-/// from its real orchestration pipes (only the root can see them; this view
-/// cannot), plus the repo conventions bundle — impl-jump resolver and style.
+/// wires a Debug menu command to `toggle`, passing the `PipeDescriptor`s it
+/// introspected from its real orchestration pipes (only the root can see them;
+/// this view cannot), plus the repo conventions bundle — impl-jump resolver and
+/// style.
 @MainActor
 public enum WiringGraphWindow {
     private static var panel: NSPanel?
 
     public static func toggle(
-        pipelines: [WiringPipeline],
+        pipelines: [PipeDescriptor],
         configuration: WiringGraphConfiguration = WiringGraphConfiguration()
     ) {
         if let panel {

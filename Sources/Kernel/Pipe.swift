@@ -109,3 +109,43 @@ public struct Pipe<Input, Output>: @unchecked Sendable {
         self.inputType = inputType
     }
 }
+
+// MARK: - Pipe descriptor (one catalog entry, for introspection)
+
+/// The pipeline-level counterpart of `StageDescriptor`: one pipeline as a catalog
+/// entry — the dispatch key it backs, a human title, and the static shape read
+/// back from the *real* `Pipe` value. A composition root builds one per pipeline
+/// (structure derived, never hand-authored) and hands the list to the wiring
+/// graph, which renders it as-is.
+///
+/// `note` carries what the static shape cannot show: out-of-pipe work that happens
+/// around the pipe run (a pre-pipe buffer write, a payload built before entry).
+/// An operation with no pipe at all still gets a descriptor — empty `stages`, a
+/// `note` saying why — so the catalog stays complete without inventing structure.
+public struct PipeDescriptor: Sendable {
+    /// The dispatch key the pipe backs, e.g. `Orchestration.Notes.update`.
+    public let key: String
+    /// The human name of the function that builds/runs the pipe.
+    public let title: String
+    /// Type name of the payload that enters the pipe.
+    public let inputType: String
+    /// The pipe's static shape, stage by stage (`Pipe.descriptors`).
+    public let stages: [StageDescriptor]
+    /// Out-of-pipe context the static shape can't show. `nil` when the pipe is
+    /// the whole story.
+    public let note: String?
+
+    public init(key: String, title: String, inputType: String, stages: [StageDescriptor], note: String? = nil) {
+        self.key = key
+        self.title = title
+        self.inputType = inputType
+        self.stages = stages
+        self.note = note
+    }
+
+    /// Read the shape straight off a real `Pipe` value — the non-drifting path:
+    /// input type and stages come from the pipe itself, never restated by hand.
+    public init<I, O>(key: String, title: String, pipe: Pipe<I, O>, note: String? = nil) {
+        self.init(key: key, title: title, inputType: pipe.inputType, stages: pipe.descriptors, note: note)
+    }
+}
