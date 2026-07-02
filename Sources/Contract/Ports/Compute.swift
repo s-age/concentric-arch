@@ -1,4 +1,5 @@
 import Foundation
+import CallableMacros
 import Kernel
 
 /// Port declarations for the Compute device — the computational resource.

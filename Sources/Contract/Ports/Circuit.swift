@@ -1,4 +1,5 @@
 import Foundation
+import CallableMacros
 import Kernel
 
 /// Port declarations for the Circuit device — the orchestration layer.

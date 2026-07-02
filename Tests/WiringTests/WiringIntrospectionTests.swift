@@ -24,8 +24,9 @@ private struct UnreachableConfigStore: ConfigStoring {
 
 /// Every symbol id the real Driver manifest binds — the compile-derived truth
 /// (`@callable` emits one `register` per port requirement, so this set cannot
-/// under-count an existing device's endpoints).
-private func boundSymbolIDs() -> Set<String> {
+/// under-count an existing device's endpoints). Shared with
+/// ImplLocationTotalityTests, which walks the same denominator.
+func boundSymbolIDs() -> Set<String> {
     let builder = KernelBuilder()
     wireAllDrivers(
         into: builder,
